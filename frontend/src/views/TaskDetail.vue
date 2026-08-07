@@ -1,0 +1,358 @@
+<template>
+  <div class="task-detail-page">
+    <div class="page-card">
+      <div class="page-header-row">
+        <div>
+          <h1 class="page-title">测试任务详情</h1>
+          <p class="page-desc">查看任务绑定范围、执行人分配、通过/失败/阻塞统计和执行记录明细。</p>
+        </div>
+        <div class="header-actions">
+          <el-button @click="$router.push('/tasks')">返回任务列表</el-button>
+          <el-button type="primary" :loading="loading" @click="loadDetail">刷新</el-button>
+          <el-button type="success" @click="$router.push('/executor')">进入执行工作台</el-button>
+        </div>
+      </div>
+    </div>
+
+    <div v-loading="loading" class="detail-content">
+      <template v-if="task">
+        <div class="summary-grid">
+          <div class="summary-card page-card">
+            <span>执行总数</span>
+            <strong>{{ task.total_executions }}</strong>
+          </div>
+          <div class="summary-card page-card success-card">
+            <span>通过</span>
+            <strong>{{ task.passed_count }}</strong>
+          </div>
+          <div class="summary-card page-card danger-card">
+            <span>失败</span>
+            <strong>{{ task.failed_count }}</strong>
+          </div>
+          <div class="summary-card page-card warning-card">
+            <span>阻塞</span>
+            <strong>{{ task.blocked_count }}</strong>
+          </div>
+          <div class="summary-card page-card info-card">
+            <span>未执行</span>
+            <strong>{{ task.not_run_count }}</strong>
+          </div>
+        </div>
+
+        <div class="page-card detail-card">
+          <div class="task-title-row">
+            <div>
+              <h2>#{{ task.task_id }} {{ task.task_name }}</h2>
+              <p>{{ task.description || '暂无任务描述' }}</p>
+            </div>
+            <el-tag size="large" :type="taskStatusTagType(task.status)">{{ STATUS_TEXT[task.status] || task.status }}</el-tag>
+          </div>
+
+          <el-progress :percentage="progressPercent" :stroke-width="14" />
+
+          <el-descriptions :column="2" border>
+            <el-descriptions-item label="创建人ID">{{ task.created_by }}</el-descriptions-item>
+            <el-descriptions-item label="更新人ID">{{ task.updated_by || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="开始时间">{{ formatDateTime(task.start_time) }}</el-descriptions-item>
+            <el-descriptions-item label="结束时间">{{ formatDateTime(task.end_time) }}</el-descriptions-item>
+            <el-descriptions-item label="创建时间">{{ formatDateTime(task.created_at) }}</el-descriptions-item>
+            <el-descriptions-item label="更新时间">{{ formatDateTime(task.updated_at) }}</el-descriptions-item>
+          </el-descriptions>
+
+          <div class="tag-section">
+            <div>
+              <span class="section-label">绑定用例集</span>
+              <el-tag v-for="caseSetId in task.case_set_ids" :key="caseSetId" type="info">#{{ caseSetId }}</el-tag>
+            </div>
+            <div>
+              <span class="section-label">执行人</span>
+              <el-tag v-for="assigneeId in task.assignee_ids" :key="assigneeId" type="success">用户 {{ assigneeId }}</el-tag>
+            </div>
+          </div>
+        </div>
+
+        <div class="page-card">
+          <div class="table-toolbar">
+            <div>
+              <h2>执行记录</h2>
+              <p>可按执行人和执行状态筛选，也可以直接在详情页快速更新执行结果。</p>
+            </div>
+            <div class="filter-tools">
+              <el-select v-model="filters.executorId" clearable placeholder="全部执行人" class="filter-select">
+                <el-option v-for="executorId in executorOptions" :key="executorId" :label="`用户 ${executorId}`" :value="executorId" />
+              </el-select>
+              <el-select v-model="filters.status" clearable placeholder="全部状态" class="filter-select">
+                <el-option v-for="option in executionStatusOptions" :key="option.value" :label="option.label" :value="option.value" />
+              </el-select>
+            </div>
+          </div>
+
+          <el-table :data="filteredExecutions" border>
+            <el-table-column prop="execution_id" label="执行ID" width="90" />
+            <el-table-column prop="case_node_id" label="用例节点ID" width="120" />
+            <el-table-column prop="executor_id" label="执行人ID" width="110" />
+            <el-table-column label="执行状态" width="120">
+              <template #default="{ row }">
+                <el-tag :type="executionStatusTagType(row.execution_status)">{{ EXECUTION_STATUS_TEXT[row.execution_status] || row.execution_status }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="actual_result" label="实际结果" min-width="240" show-overflow-tooltip />
+            <el-table-column prop="bug_description" label="缺陷描述" min-width="220" show-overflow-tooltip />
+            <el-table-column label="同步状态" width="110">
+              <template #default="{ row }">
+                <el-tag :type="row.sync_status === 'synced' ? 'success' : 'danger'">{{ row.sync_status }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="sync_version" label="版本" width="80" />
+            <el-table-column prop="executed_at" label="执行时间" width="190">
+              <template #default="{ row }">{{ formatDateTime(row.executed_at) }}</template>
+            </el-table-column>
+            <el-table-column label="操作" width="120" fixed="right">
+              <template #default="{ row }">
+                <el-button size="small" type="primary" @click="openExecutionDialog(row)">更新</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+      </template>
+
+      <div v-else class="page-card">
+        <el-empty description="未找到任务详情" />
+      </div>
+    </div>
+
+    <el-dialog v-model="executionDialogVisible" title="更新执行记录" width="620px">
+      <el-form label-width="90px">
+        <el-form-item label="执行状态">
+          <el-radio-group v-model="executionForm.execution_status">
+            <el-radio-button label="not_run">未执行</el-radio-button>
+            <el-radio-button label="passed">通过</el-radio-button>
+            <el-radio-button label="failed">失败</el-radio-button>
+            <el-radio-button label="blocked">阻塞</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="实际结果">
+          <el-input v-model="executionForm.actual_result" type="textarea" :rows="3" placeholder="填写实际执行结果" />
+        </el-form-item>
+        <el-form-item label="缺陷描述">
+          <el-input v-model="executionForm.bug_description" type="textarea" :rows="3" placeholder="失败或阻塞时填写缺陷、环境或前置条件问题" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="executionDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="updating" @click="handleUpdateExecution">保存</el-button>
+      </template>
+    </el-dialog>
+  </div>
+</template>
+
+<script setup>
+import { computed, onMounted, reactive, ref } from 'vue'
+import { useRoute } from 'vue-router'
+import { getTaskDetail, listTaskExecutions, updateExecution } from '../api/task'
+import { EXECUTION_STATUS_TEXT, STATUS_TEXT } from '../utils/constants'
+import { showSuccess, showWarning } from '../utils/message'
+
+const route = useRoute()
+const taskId = Number(route.params.id)
+const loading = ref(false)
+const updating = ref(false)
+const task = ref(null)
+const executions = ref([])
+const executionDialogVisible = ref(false)
+const activeExecution = ref(null)
+const filters = reactive({
+  executorId: null,
+  status: ''
+})
+const executionForm = reactive({
+  execution_status: 'not_run',
+  actual_result: '',
+  bug_description: ''
+})
+
+const executionStatusOptions = [
+  { label: '未执行', value: 'not_run' },
+  { label: '通过', value: 'passed' },
+  { label: '失败', value: 'failed' },
+  { label: '阻塞', value: 'blocked' }
+]
+
+const progressPercent = computed(() => {
+  if (!task.value?.total_executions) {
+    return 0
+  }
+  const finishedCount = task.value.total_executions - task.value.not_run_count
+  return Math.round((finishedCount / task.value.total_executions) * 100)
+})
+
+const executorOptions = computed(() => Array.from(new Set(executions.value.map(item => item.executor_id))))
+const filteredExecutions = computed(() => executions.value.filter(item => {
+  const executorMatches = !filters.executorId || item.executor_id === filters.executorId
+  const statusMatches = !filters.status || item.execution_status === filters.status
+  return executorMatches && statusMatches
+}))
+
+async function loadDetail() {
+  loading.value = true
+  try {
+    const [taskDetail, executionList] = await Promise.all([
+      getTaskDetail(taskId),
+      listTaskExecutions(taskId)
+    ])
+    task.value = taskDetail
+    executions.value = executionList
+  } finally {
+    loading.value = false
+  }
+}
+
+function openExecutionDialog(row) {
+  activeExecution.value = row
+  executionForm.execution_status = row.execution_status
+  executionForm.actual_result = row.actual_result || ''
+  executionForm.bug_description = row.bug_description || ''
+  executionDialogVisible.value = true
+}
+
+async function handleUpdateExecution() {
+  if (!activeExecution.value) {
+    showWarning('请先选择一条执行记录')
+    return
+  }
+  updating.value = true
+  try {
+    await updateExecution(activeExecution.value.execution_id, {
+      executor_id: activeExecution.value.executor_id,
+      execution_status: executionForm.execution_status,
+      actual_result: executionForm.actual_result.trim() || null,
+      bug_description: executionForm.bug_description.trim() || null,
+      sync_version: activeExecution.value.sync_version
+    })
+    showSuccess('执行记录已更新')
+    executionDialogVisible.value = false
+    await loadDetail()
+  } finally {
+    updating.value = false
+  }
+}
+
+function taskStatusTagType(status) {
+  if (status === 'finished') return 'success'
+  if (status === 'running') return 'warning'
+  if (status === 'assigned') return 'info'
+  if (status === 'cancelled') return 'danger'
+  return 'info'
+}
+
+function executionStatusTagType(status) {
+  if (status === 'passed') return 'success'
+  if (status === 'failed') return 'danger'
+  if (status === 'blocked') return 'warning'
+  return 'info'
+}
+
+function formatDateTime(value) {
+  if (!value) {
+    return '-'
+  }
+  return String(value).replace('T', ' ').slice(0, 19)
+}
+
+onMounted(loadDetail)
+</script>
+
+<style scoped>
+.task-detail-page,
+.detail-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.page-header-row,
+.task-title-row,
+.table-toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.header-actions,
+.filter-tools,
+.tag-section,
+.tag-section > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.summary-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.summary-card span {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.summary-card strong {
+  color: #1f2937;
+  font-size: 28px;
+}
+
+.success-card strong {
+  color: #16a34a;
+}
+
+.danger-card strong {
+  color: #dc2626;
+}
+
+.warning-card strong {
+  color: #d97706;
+}
+
+.info-card strong {
+  color: #2563eb;
+}
+
+.detail-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.task-title-row h2,
+.table-toolbar h2 {
+  margin: 0 0 8px;
+}
+
+.task-title-row p,
+.table-toolbar p {
+  margin: 0;
+  color: #64748b;
+}
+
+.tag-section {
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+
+.section-label {
+  color: #475569;
+  font-weight: 700;
+}
+
+.filter-select {
+  width: 150px;
+}
+</style>
