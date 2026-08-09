@@ -171,16 +171,27 @@ def get_executor_tasks(db: Session, executor_id: int) -> list[dict]:
     tasks = list(
         db.scalars(select(TestTask).where(TestTask.task_id.in_(task_ids), TestTask.is_deleted == 0)).all()
     )
+    active_task_ids = [task.task_id for task in tasks]
+    if not active_task_ids:
+        return []
+
+    executions = list(
+        db.scalars(
+            select(TestExecutionRecord)
+            .where(TestExecutionRecord.task_id.in_(active_task_ids), TestExecutionRecord.executor_id == executor_id)
+            .order_by(TestExecutionRecord.execution_id.asc())
+        ).all()
+    )
+
+    # 一次 enrich 所有执行记录，避免每个任务单独查询一次节点表。
+    all_enriched = enrich_executions(db, executions)
+    enriched_by_task: dict[int, list[dict]] = {}
+    for item in all_enriched:
+        enriched_by_task.setdefault(item["task_id"], []).append(item)
+
     result = []
     for task in tasks:
-        executions = list(
-            db.scalars(
-                select(TestExecutionRecord)
-                .where(TestExecutionRecord.task_id == task.task_id, TestExecutionRecord.executor_id == executor_id)
-                .order_by(TestExecutionRecord.execution_id.asc())
-            ).all()
-        )
-        result.append({"task": task, "executions": enrich_executions(db, executions)})
+        result.append({"task": task, "executions": enriched_by_task.get(task.task_id, [])})
     return result
 
 

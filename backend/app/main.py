@@ -1,4 +1,5 @@
 from fastapi import Depends, FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.auth import router as auth_router
 from app.api.ai import router as ai_router
@@ -20,6 +21,15 @@ app = FastAPI(
     title=settings.app_name,
     description="基于大模型与RAG的思维导图测试用例自动生成与管理平台",
     version="0.1.0",
+)
+
+# 允许前端开发服务器跨域访问，方便直接调用 8011 端口调试。
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins_list,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # 注册统一异常处理，避免把底层异常细节直接回显给前端。

@@ -49,6 +49,8 @@ class Settings(BaseSettings):
     auth_secret_key: str = "rag-mindmap-dev-secret-change-me"
     auth_token_expire_minutes: int = 60 * 24
 
+    cors_origins: str = ""
+
     model_config = SettingsConfigDict(
         env_file=ENV_FILE,
         env_file_encoding="utf-8",
@@ -82,6 +84,13 @@ class Settings(BaseSettings):
     @property
     def hf_home_dir(self) -> str:
         return _resolve_storage_path(self.hf_home, "storage/models/huggingface")
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        """逗号分隔的允许跨域来源，空则默认放行前端开发地址。"""
+        if self.cors_origins.strip():
+            return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+        return ["http://127.0.0.1:5173", "http://localhost:5173"]
 
 
 @lru_cache
