@@ -22,6 +22,9 @@ DROP TABLE IF EXISTS test_case_nodes;
 DROP TABLE IF EXISTS xmind_import_batches;
 DROP TABLE IF EXISTS xmind_files;
 DROP TABLE IF EXISTS test_case_sets;
+DROP TABLE IF EXISTS case_node_metas;
+DROP TABLE IF EXISTS case_set_snapshots;
+DROP TABLE IF EXISTS case_set_reviews;
 DROP TABLE IF EXISTS users;
 
 SET FOREIGN_KEY_CHECKS = 1;
@@ -358,3 +361,49 @@ CREATE TABLE ai_generation_records (
     INDEX idx_ai_generation_records_status (generation_status),
     INDEX idx_ai_generation_records_created_at (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI测试用例生成记录表';
+
+CREATE TABLE case_node_metas (
+    meta_id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '节点元数据ID',
+    case_set_id BIGINT NOT NULL COMMENT '所属用例集ID',
+    node_id BIGINT NOT NULL COMMENT '节点ID',
+    meta_type VARCHAR(30) NOT NULL COMMENT '元数据类型：tag/note/link/image/review',
+    meta_key VARCHAR(50) DEFAULT NULL COMMENT '类型内键名，如tag文本',
+    meta_value JSON DEFAULT NULL COMMENT '元数据内容JSON',
+    created_by BIGINT DEFAULT NULL COMMENT '创建人ID',
+    updated_by BIGINT DEFAULT NULL COMMENT '更新人ID',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    CONSTRAINT fk_case_node_metas_case_set FOREIGN KEY (case_set_id) REFERENCES test_case_sets(case_set_id) ON DELETE CASCADE,
+    CONSTRAINT fk_case_node_metas_node FOREIGN KEY (node_id) REFERENCES test_case_nodes(node_id) ON DELETE CASCADE,
+    CONSTRAINT fk_case_node_metas_created_by FOREIGN KEY (created_by) REFERENCES users(user_id),
+    CONSTRAINT fk_case_node_metas_updated_by FOREIGN KEY (updated_by) REFERENCES users(user_id),
+    UNIQUE KEY uk_case_node_metas (case_set_id, node_id, meta_type, meta_key),
+    INDEX idx_case_node_metas_case_set (case_set_id),
+    INDEX idx_case_node_metas_node (node_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用例节点脑图元数据表（标签/备注/链接/图片/评审）';
+
+CREATE TABLE case_set_snapshots (
+    snapshot_id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '脑图快照ID',
+    case_set_id BIGINT NOT NULL COMMENT '所属用例集ID',
+    name VARCHAR(200) NOT NULL COMMENT '快照名称',
+    data_json JSON NOT NULL COMMENT '快照数据（标签/备注/链接/图片/评审/折叠/外观）',
+    created_by BIGINT NOT NULL COMMENT '创建人ID',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    CONSTRAINT fk_case_set_snapshots_case_set FOREIGN KEY (case_set_id) REFERENCES test_case_sets(case_set_id) ON DELETE CASCADE,
+    CONSTRAINT fk_case_set_snapshots_created_by FOREIGN KEY (created_by) REFERENCES users(user_id),
+    INDEX idx_case_set_snapshots_case_set (case_set_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用例集脑图版本快照表';
+
+CREATE TABLE case_set_reviews (
+    review_id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '用例集评审记录ID',
+    case_set_id BIGINT NOT NULL COMMENT '所属用例集ID',
+    reviewer_ids JSON NOT NULL COMMENT '评审人ID列表',
+    due_at DATETIME DEFAULT NULL COMMENT '截止时间',
+    note TEXT DEFAULT NULL COMMENT '评审说明',
+    status VARCHAR(30) NOT NULL DEFAULT 'submitted' COMMENT '评审状态：submitted/completed',
+    created_by BIGINT NOT NULL COMMENT '发起人ID',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    CONSTRAINT fk_case_set_reviews_case_set FOREIGN KEY (case_set_id) REFERENCES test_case_sets(case_set_id) ON DELETE CASCADE,
+    CONSTRAINT fk_case_set_reviews_created_by FOREIGN KEY (created_by) REFERENCES users(user_id),
+    INDEX idx_case_set_reviews_case_set (case_set_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用例集评审记录表';

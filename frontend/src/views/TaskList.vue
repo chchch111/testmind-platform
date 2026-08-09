@@ -16,7 +16,7 @@
     <div class="summary-grid">
       <div class="summary-card page-card">
         <span>任务总数</span>
-        <strong>{{ tasks.length }}</strong>
+        <strong>{{ filters.keyword || filters.status ? filteredTasks.length : taskTotal }}</strong>
       </div>
       <div class="summary-card page-card">
         <span>执行中</span>
@@ -33,7 +33,15 @@
     </div>
 
     <div class="page-card">
-      <el-table v-loading="loading" :data="tasks" border>
+      <div class="filter-bar">
+        <el-input v-model="filters.keyword" clearable placeholder="按任务名称/描述搜索" class="keyword-input" />
+        <el-select v-model="filters.status" clearable placeholder="全部状态" class="filter-select">
+          <el-option v-for="option in taskStatusOptions" :key="option.value" :label="option.label" :value="option.value" />
+        </el-select>
+        <el-button @click="resetFilters">重置筛选</el-button>
+        <span class="filter-count">筛选结果 {{ filteredTasks.length }} 条</span>
+      </div>
+      <el-table v-loading="loading" :data="filteredTasks" border>
         <el-table-column prop="task_id" label="ID" width="80" />
         <el-table-column prop="task_name" label="任务名称" min-width="220" />
         <el-table-column prop="description" label="任务描述" min-width="260" show-overflow-tooltip />
@@ -42,13 +50,21 @@
             <el-tag :type="taskStatusTagType(row.status)">{{ STATUS_TEXT[row.status] || row.status }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="start_time" label="开始时间" width="190" />
-        <el-table-column prop="end_time" label="结束时间" width="190" />
-        <el-table-column prop="created_at" label="创建时间" width="190" />
-        <el-table-column label="操作" width="220" fixed="right">
+        <el-table-column label="开始时间" width="190">
+          <template #default="{ row }">{{ formatDateTime(row.start_time) }}</template>
+        </el-table-column>
+        <el-table-column label="结束时间" width="190">
+          <template #default="{ row }">{{ formatDateTime(row.end_time) }}</template>
+        </el-table-column>
+        <el-table-column label="创建时间" width="190">
+          <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="280" fixed="right">
           <template #default="{ row }">
             <el-button size="small" type="primary" @click="$router.push(`/tasks/${row.task_id}`)">详情</el-button>
             <el-button size="small" @click="$router.push('/executor')">执行工作台</el-button>
+            <el-button size="small" type="warning" :disabled="row.status === 'cancelled' || row.status === 'finished'" @click="handleCancelTask(row)">取消</el-button>
+            <el-button size="small" type="danger" @click="handleDeleteTask(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -103,30 +119,45 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { listCaseSets } from '../api/case'
-import { createTask, listTasks } from '../api/task'
+import { cancelTask, createTask, deleteTask, listTasks } from '../api/task'
 import { STATUS_TEXT } from '../utils/constants'
-import { showSuccess, showWarning } from '../utils/message'
+import { formatDateTime } from '../utils/format'
+import { confirmAction, showSuccess, showWarning } from '../utils/message'
 import { getCurrentUserId } from '../utils/storage'
 
 const loading = ref(false)
 const creating = ref(false)
 const createDialogVisible = ref(false)
 const tasks = ref([])
+const taskTotal = ref(0)
 const caseSets = ref([])
 const assigneeInputValues = ref([String(getCurrentUserId())])
 const dateRange = ref([])
+const filters = reactive({ keyword: '', status: '' })
 const createForm = reactive({
   task_name: '',
   description: '',
   case_set_ids: []
 })
 
+const taskStatusOptions = ['assigned', 'running', 'finished', 'cancelled'].map(value => ({ value, label: STATUS_TEXT[value] || value }))
+const filteredTasks = computed(() => {
+  const keyword = filters.keyword.trim().toLowerCase()
+  return tasks.value.filter(task => {
+    const keywordMatches = !keyword || `${task.task_name || ''} ${task.description || ''}`.toLowerCase().includes(keyword)
+    const statusMatches = !filters.status || task.status === filters.status
+    return keywordMatches && statusMatches
+  })
+})
+
 async function loadTasks() {
   loading.value = true
   try {
-    tasks.value = await listTasks({ page: 1, page_size: 100 })
+    const result = await listTasks({ page: 1, page_size: 100 })
+    tasks.value = Array.isArray(result) ? result : result.items || []
+    taskTotal.value = Array.isArray(result) ? result.length : result.total || 0
   } finally {
     loading.value = false
   }
@@ -193,8 +224,27 @@ function normalizeAssigneeIds() {
   ))
 }
 
+async function handleCancelTask(row) {
+  await confirmAction(`确认取消任务「${row.task_name}」吗？取消后任务状态将变为已取消。`, '取消测试任务')
+  await cancelTask(row.task_id)
+  showSuccess('测试任务已取消')
+  await loadTasks()
+}
+
+async function handleDeleteTask(row) {
+  await confirmAction(`确认删除任务「${row.task_name}」吗？删除后任务将不再出现在列表中。`, '删除测试任务')
+  await deleteTask(row.task_id)
+  showSuccess('测试任务已删除')
+  await loadTasks()
+}
+
+function resetFilters() {
+  filters.keyword = ''
+  filters.status = ''
+}
+
 function countByStatus(status) {
-  return tasks.value.filter(task => task.status === status).length
+  return filteredTasks.value.filter(task => task.status === status).length
 }
 
 function taskStatusTagType(status) {
@@ -227,6 +277,27 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.filter-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.keyword-input {
+  width: 260px;
+}
+
+.filter-select {
+  width: 150px;
+}
+
+.filter-count {
+  color: #64748b;
+  font-size: 13px;
 }
 
 .summary-grid {

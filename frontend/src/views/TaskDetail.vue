@@ -10,6 +10,8 @@
           <el-button @click="$router.push('/tasks')">返回任务列表</el-button>
           <el-button type="primary" :loading="loading" @click="loadDetail">刷新</el-button>
           <el-button type="success" @click="$router.push('/executor')">进入执行工作台</el-button>
+          <el-button type="warning" :disabled="!task || task.status === 'cancelled' || task.status === 'finished'" @click="handleCancelTask">取消任务</el-button>
+          <el-button type="danger" :disabled="!task" @click="handleDeleteTask">删除任务</el-button>
         </div>
       </div>
     </div>
@@ -78,6 +80,7 @@
               <p>可按执行人和执行状态筛选，也可以直接在详情页快速更新执行结果。</p>
             </div>
             <div class="filter-tools">
+              <el-button type="primary" @click="exportExecutionCsv">导出CSV</el-button>
               <el-select v-model="filters.executorId" clearable placeholder="全部执行人" class="filter-select">
                 <el-option v-for="executorId in executorOptions" :key="executorId" :label="`用户 ${executorId}`" :value="executorId" />
               </el-select>
@@ -129,6 +132,7 @@
             <el-radio-button label="passed">通过</el-radio-button>
             <el-radio-button label="failed">失败</el-radio-button>
             <el-radio-button label="blocked">阻塞</el-radio-button>
+            <el-radio-button label="skipped">不适用</el-radio-button>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="实际结果">
@@ -148,12 +152,13 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
-import { useRoute } from 'vue-router'
-import { getTaskDetail, listTaskExecutions, updateExecution } from '../api/task'
+import { useRoute, useRouter } from 'vue-router'
+import { cancelTask, deleteTask, getTaskDetail, listTaskExecutions, updateExecution } from '../api/task'
 import { EXECUTION_STATUS_TEXT, STATUS_TEXT } from '../utils/constants'
-import { showSuccess, showWarning } from '../utils/message'
+import { confirmAction, showSuccess, showWarning } from '../utils/message'
 
 const route = useRoute()
+const router = useRouter()
 const taskId = Number(route.params.id)
 const loading = ref(false)
 const updating = ref(false)
@@ -175,7 +180,8 @@ const executionStatusOptions = [
   { label: '未执行', value: 'not_run' },
   { label: '通过', value: 'passed' },
   { label: '失败', value: 'failed' },
-  { label: '阻塞', value: 'blocked' }
+  { label: '阻塞', value: 'blocked' },
+  { label: '不适用', value: 'skipped' }
 ]
 
 const progressPercent = computed(() => {
@@ -205,6 +211,26 @@ async function loadDetail() {
   } finally {
     loading.value = false
   }
+}
+
+async function handleCancelTask() {
+  if (!task.value) {
+    return
+  }
+  await confirmAction(`确认取消任务「${task.value.task_name}」吗？`, '取消测试任务')
+  await cancelTask(taskId)
+  showSuccess('测试任务已取消')
+  await loadDetail()
+}
+
+async function handleDeleteTask() {
+  if (!task.value) {
+    return
+  }
+  await confirmAction(`确认删除任务「${task.value.task_name}」吗？删除后任务将不再出现在列表中。`, '删除测试任务')
+  await deleteTask(taskId)
+  showSuccess('测试任务已删除')
+  router.replace('/tasks')
 }
 
 function openExecutionDialog(row) {
@@ -249,7 +275,49 @@ function executionStatusTagType(status) {
   if (status === 'passed') return 'success'
   if (status === 'failed') return 'danger'
   if (status === 'blocked') return 'warning'
+  if (status === 'skipped') return 'info'
   return 'info'
+}
+
+function exportExecutionCsv() {
+  if (!task.value || !filteredExecutions.value.length) {
+    showWarning('当前没有可导出的执行记录')
+    return
+  }
+  const rows = [
+    ['任务ID', '任务名称', '任务状态', '执行ID', '用例节点ID', '执行人ID', '执行状态', '实际结果', '缺陷描述', '同步状态', '同步版本', '执行时间', '创建时间'],
+    ...filteredExecutions.value.map(row => [
+      task.value.task_id,
+      task.value.task_name,
+      STATUS_TEXT[task.value.status] || task.value.status,
+      row.execution_id,
+      row.case_node_id,
+      row.executor_id,
+      EXECUTION_STATUS_TEXT[row.execution_status] || row.execution_status,
+      row.actual_result || '',
+      row.bug_description || '',
+      row.sync_status,
+      row.sync_version,
+      formatDateTime(row.executed_at),
+      formatDateTime(row.created_at)
+    ])
+  ]
+  const csvContent = rows.map(row => row.map(escapeCsvCell).join(',')).join('\n')
+  const blob = new Blob([`﻿${csvContent}`], { type: 'text/csv;charset=utf-8;' })
+  const link = document.createElement('a')
+  link.href = URL.createObjectURL(blob)
+  link.download = `测试任务_${task.value.task_id}_执行报告.csv`
+  link.click()
+  URL.revokeObjectURL(link.href)
+  showSuccess(`已导出 ${filteredExecutions.value.length} 条执行记录`)
+}
+
+function escapeCsvCell(value) {
+  const text = String(value ?? '')
+  if (/[",\n\r]/.test(text)) {
+    return `"${text.replace(/"/g, '""')}"`
+  }
+  return text
 }
 
 function formatDateTime(value) {

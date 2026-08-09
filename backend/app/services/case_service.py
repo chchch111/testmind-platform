@@ -118,6 +118,9 @@ def update_case_node(db: Session, node_id: int, data: CaseNodeUpdate) -> TestCas
     if "priority" in update_data and update_data["priority"] not in VALID_PRIORITIES:
         raise HTTPException(status_code=400, detail="priority只能是P0/P1/P2/P3")
 
+    if "parent_id" in update_data:
+        validate_parent_change(db, node, update_data["parent_id"])
+
     for field, value in update_data.items():
         setattr(node, field, value)
 
@@ -131,6 +134,26 @@ def update_case_node(db: Session, node_id: int, data: CaseNodeUpdate) -> TestCas
     db.commit()
     db.refresh(node)
     return node
+
+
+def validate_parent_change(db: Session, node: TestCaseNode, parent_id: int | None) -> None:
+    if parent_id is None:
+        return
+
+    if parent_id == node.node_id:
+        raise HTTPException(status_code=400, detail="不能将节点移动到自身下面")
+
+    parent = db.get(TestCaseNode, parent_id)
+    if not parent or parent.is_deleted == 1 or parent.case_set_id != node.case_set_id:
+        raise HTTPException(status_code=400, detail="父节点不存在或不属于当前用例集")
+
+    current = parent
+    while current.parent_id is not None:
+        if current.parent_id == node.node_id:
+            raise HTTPException(status_code=400, detail="不能将节点移动到自己的子节点下面")
+        current = db.get(TestCaseNode, current.parent_id)
+        if not current or current.is_deleted == 1:
+            break
 
 
 def list_node_versions(db: Session, node_id: int) -> list[TestCaseNodeVersion]:

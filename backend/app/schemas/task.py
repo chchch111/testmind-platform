@@ -38,6 +38,13 @@ class TaskDetailOut(TaskOut):
     not_run_count: int
 
 
+class TaskPageOut(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    items: list[TaskOut]
+
+
 class ExecutionOut(BaseModel):
     execution_id: int
     task_id: int

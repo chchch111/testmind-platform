@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { showError } from '../utils/message'
+import { clearAuth, getAuthToken } from '../utils/storage'
 
 function getErrorMessage(error) {
   if (!error.response) {
@@ -33,11 +34,28 @@ const request = axios.create({
   timeout: 240000
 })
 
+request.interceptors.request.use(config => {
+  const token = getAuthToken()
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
+})
+
 request.interceptors.response.use(
   response => response.data,
   error => {
     const message = getErrorMessage(error)
+    const status = error.response?.status
     showError(message)
+    if (status === 401 && window.location.pathname !== '/login') {
+      clearAuth()
+      const redirect = encodeURIComponent(`${window.location.pathname}${window.location.search}`)
+      window.location.href = `/login?redirect=${redirect}`
+    }
+    if (status === 403 && !['/login', '/403'].includes(window.location.pathname)) {
+      window.location.href = '/403'
+    }
     return Promise.reject(new Error(message))
   }
 )

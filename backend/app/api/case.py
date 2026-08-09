@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
+from app.core.auth import get_current_active_user
 from app.db.deps import get_db
+from app.models.user import User
 from app.schemas.case import (
     CaseNodeCreate,
     CaseNodeOut,
@@ -32,7 +34,12 @@ router = APIRouter(prefix="/api", tags=["思维导图用例管理"])
 
 
 @router.post("/case-sets", response_model=CaseSetOut)
-def api_create_case_set(data: CaseSetCreate, db: Session = Depends(get_db)):
+def api_create_case_set(
+    data: CaseSetCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    data.created_by = current_user.user_id
     return create_case_set(db, data)
 
 
@@ -46,12 +53,22 @@ def api_list_case_sets(
 
 
 @router.delete("/case-sets/{case_set_id}")
-def api_delete_case_set(case_set_id: int, data: DeleteRequest, db: Session = Depends(get_db)):
-    return delete_case_set(db, case_set_id, data.operator_id)
+def api_delete_case_set(
+    case_set_id: int,
+    data: DeleteRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    return delete_case_set(db, case_set_id, current_user.user_id)
 
 
 @router.post("/case-nodes", response_model=CaseNodeOut)
-def api_create_case_node(data: CaseNodeCreate, db: Session = Depends(get_db)):
+def api_create_case_node(
+    data: CaseNodeCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    data.created_by = current_user.user_id
     return create_case_node(db, data)
 
 
@@ -66,13 +83,24 @@ def api_get_case_node(node_id: int, db: Session = Depends(get_db)):
 
 
 @router.put("/case-nodes/{node_id}", response_model=CaseNodeOut)
-def api_update_case_node(node_id: int, data: CaseNodeUpdate, db: Session = Depends(get_db)):
+def api_update_case_node(
+    node_id: int,
+    data: CaseNodeUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    data.updated_by = current_user.user_id
     return update_case_node(db, node_id, data)
 
 
 @router.delete("/case-nodes/{node_id}")
-def api_delete_case_node(node_id: int, data: DeleteRequest, db: Session = Depends(get_db)):
-    return delete_case_node(db, node_id, data.operator_id)
+def api_delete_case_node(
+    node_id: int,
+    data: DeleteRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    return delete_case_node(db, node_id, current_user.user_id)
 
 
 @router.get("/case-nodes/{node_id}/versions", response_model=list[CaseNodeVersionOut])
@@ -81,5 +109,11 @@ def api_list_node_versions(node_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/case-nodes/{node_id}/rollback/{version_id}", response_model=CaseNodeOut)
-def api_rollback_node(node_id: int, version_id: int, data: RollbackRequest, db: Session = Depends(get_db)):
-    return rollback_node(db, node_id, version_id, data.operator_id, data.change_note)
+def api_rollback_node(
+    node_id: int,
+    version_id: int,
+    data: RollbackRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    return rollback_node(db, node_id, version_id, current_user.user_id, data.change_note)

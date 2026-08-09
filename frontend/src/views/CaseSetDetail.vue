@@ -9,7 +9,7 @@
       <div class="header-actions">
         <el-button type="primary" @click="createCanvasSnapshot">创建版本</el-button>
         <el-button type="primary" @click="snapshotDialogVisible = true">版本快照</el-button>
-        <el-button type="primary" @click="showSuccess('已提交用例评审流程')">发起用例评审</el-button>
+        <el-button type="primary" @click="openCaseReviewDialog">发起用例评审</el-button>
         <el-button type="primary" @click="openSearchDialog">搜索用例</el-button>
         <el-button type="primary" @click="versionDrawerVisible = true" :disabled="!selectedNode">历史</el-button>
         <el-button @click="shortcutDialogVisible = true">快捷键</el-button>
@@ -165,6 +165,10 @@
         @zoom-out="zoomOut"
         @reset-view="resetZoom"
         @viewport-active-change="isMindmapViewportActive = $event"
+        @viewport-change="handleViewportChange"
+        @node-drag-start="handleNodeDragStart"
+        @node-drop="handleNodeDrop"
+        @node-drag-end="draggingNode = null"
       />
 
       <div class="viewer-badge">1人正在查看</div>
@@ -176,8 +180,18 @@
         <el-button circle size="small" title="居中" @click="resetZoom">中</el-button>
         <div class="zoom-value">{{ Math.round(zoom * 100) }}%</div>
       </div>
-      <div class="mini-map">
-        <div class="mini-map-lines" />
+      <div class="mini-map" title="当前脑图缩略视图">
+        <svg v-if="miniMapLayout.nodes.length" class="mini-map-svg" viewBox="0 0 118 88" aria-label="脑图迷你地图">
+          <circle
+            v-for="node in miniMapLayout.nodes"
+            :key="node.id"
+            :cx="node.x"
+            :cy="node.y"
+            :r="node.selected ? 3.2 : 2.4"
+            :class="['mini-map-node-dot', { selected: node.selected, case: node.nodeType === 'case' }]"
+          />
+        </svg>
+        <div v-else class="mini-map-empty">暂无节点</div>
         <div class="mini-map-window" :style="miniMapWindowStyle" />
       </div>
       <div v-if="contextMenuVisible" class="quick-node-menu" :style="contextMenuStyle" @click.stop>
@@ -206,7 +220,7 @@
         <div class="quick-extra-actions">
           <el-button round @click="runContextAction(() => openNoteDialog(selectedNode))">备注</el-button>
           <el-button round @click="runContextAction(() => openReviewDialog(selectedNode))">评审</el-button>
-          <el-button round disabled>自动化</el-button>
+          <el-button round @click="runContextAction(() => openAutomationDialog(selectedNode))">自动化</el-button>
         </div>
       </div>
       <el-button class="floating-save" type="primary" @click="handleSaveCanvas">保存</el-button>
@@ -233,6 +247,43 @@
       </template>
       <el-empty v-else description="请先点击一个节点" />
     </el-drawer>
+
+    <el-dialog v-model="caseReviewDialogVisible" title="发起用例集评审" width="720px">
+      <div class="case-review-body">
+        <el-form label-width="100px">
+          <el-form-item label="评审人ID">
+            <el-select
+              v-model="caseReviewForm.reviewerIds"
+              multiple
+              filterable
+              allow-create
+              default-first-option
+              placeholder="输入评审人ID后回车，例如 1、2、3"
+              class="wide-select"
+            />
+          </el-form-item>
+          <el-form-item label="截止时间">
+            <el-date-picker v-model="caseReviewForm.dueAt" type="datetime" value-format="YYYY-MM-DD HH:mm:ss" placeholder="选择评审截止时间" />
+          </el-form-item>
+          <el-form-item label="评审说明">
+            <el-input v-model="caseReviewForm.note" type="textarea" :rows="4" placeholder="例如：请重点检查前置条件、异常分支和预期结果是否完整。" />
+          </el-form-item>
+        </el-form>
+        <div class="review-history" v-if="caseReviewRecords.length">
+          <div class="review-history-title">最近评审记录</div>
+          <div v-for="record in caseReviewRecords" :key="record.review_id" class="review-history-item">
+            <strong>已发起评审</strong>
+            <span>评审人：{{ (record.reviewer_ids || []).join('、') }}</span>
+            <span>截止：{{ record.due_at || '未设置' }}</span>
+            <small>{{ record.note || '无说明' }}</small>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="caseReviewDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="submitCaseReview">提交评审</el-button>
+      </template>
+    </el-dialog>
 
     <el-dialog v-model="nodeDialogVisible" :title="nodeDialogTitle" width="680px">
       <CaseNodeForm v-model="nodeForm" :show-change-note="dialogMode === 'edit'" />
@@ -324,6 +375,25 @@
       </template>
     </el-dialog>
 
+    <el-dialog v-model="automationDialogVisible" title="自动化脚本草稿" width="760px">
+      <div v-if="automationNode" class="automation-dialog-body">
+        <div class="note-node-title">当前用例：{{ automationNode.title }}</div>
+        <div class="automation-tools">
+          <el-radio-group v-model="automationTemplate" size="small" @change="refreshAutomationScript">
+            <el-radio-button label="pytest">Pytest</el-radio-button>
+            <el-radio-button label="selenium">Selenium</el-radio-button>
+            <el-radio-button label="manual">手工步骤</el-radio-button>
+          </el-radio-group>
+          <el-button size="small" @click="refreshAutomationScript">重新生成</el-button>
+        </div>
+        <el-input v-model="automationScript" type="textarea" :rows="18" spellcheck="false" />
+      </div>
+      <template #footer>
+        <el-button @click="automationDialogVisible = false">关闭</el-button>
+        <el-button type="primary" @click="copyAutomationScript">复制脚本</el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="searchDialogVisible" title="查找节点" width="520px">
       <el-input v-model="searchKeyword" placeholder="输入节点标题关键字" clearable @keyup.enter="selectSearchResult(0)" />
       <div class="search-result-list">
@@ -343,16 +413,18 @@
     <el-dialog v-model="snapshotDialogVisible" title="脑图版本快照" width="760px">
       <el-table :data="canvasSnapshots" border max-height="360">
         <el-table-column prop="name" label="快照名称" min-width="180" />
-        <el-table-column prop="created_at" label="创建时间" width="190" />
+        <el-table-column label="创建时间" width="190">
+          <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
+        </el-table-column>
         <el-table-column label="内容" min-width="220">
           <template #default="{ row }">
-            标签 {{ Object.keys(row.data.nodeTagsMap || {}).length }} 个节点，备注 {{ Object.keys(row.data.nodeNotesMap || {}).length }} 个节点，评审 {{ Object.keys(row.data.nodeReviewsMap || {}).length }} 个节点
+            标签 {{ Object.keys(row.data_json?.nodeTagsMap || {}).length }} 个节点，备注 {{ Object.keys(row.data_json?.nodeNotesMap || {}).length }} 个节点，评审 {{ Object.keys(row.data_json?.nodeReviewsMap || {}).length }} 个节点
           </template>
         </el-table-column>
         <el-table-column label="操作" width="190">
           <template #default="{ row }">
             <el-button size="small" type="primary" @click="restoreCanvasSnapshot(row)">恢复</el-button>
-            <el-button size="small" type="danger" @click="deleteCanvasSnapshot(row.id)">删除</el-button>
+            <el-button size="small" type="danger" @click="deleteCanvasSnapshot(row.snapshot_id)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -393,28 +465,26 @@ import { ElMessageBox } from 'element-plus'
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { createCaseNode, deleteCaseNode, getCaseTree, updateCaseNode } from '../api/case'
+import { createReview, createSnapshot, deleteSnapshot, getCaseSetMetas, listReviews, listSnapshots, saveCaseSetMetas } from '../api/canvas'
 import CaseNodeForm from '../components/CaseNodeForm.vue'
 import MindMapCanvas from '../components/MindMapCanvas.vue'
 import VersionDrawer from '../components/VersionDrawer.vue'
 import { NODE_TYPE_TEXT } from '../utils/constants'
+import { formatDateTime } from '../utils/format'
 import { confirmAction, showSuccess, showWarning } from '../utils/message'
 import { getCurrentUserId } from '../utils/storage'
 
 const route = useRoute()
 const caseSetId = Number(route.params.id)
 const customTagStorageKey = `rag_mindmap_custom_tags_${caseSetId}`
-const nodeTagStorageKey = `rag_mindmap_node_tags_${caseSetId}`
-const nodeNoteStorageKey = `rag_mindmap_node_notes_${caseSetId}`
-const nodeLinkStorageKey = `rag_mindmap_node_links_${caseSetId}`
-const nodeImageStorageKey = `rag_mindmap_node_images_${caseSetId}`
-const nodeReviewStorageKey = `rag_mindmap_node_reviews_${caseSetId}`
 const collapsedNodeStorageKey = `rag_mindmap_collapsed_nodes_${caseSetId}`
 const appearanceStorageKey = `rag_mindmap_appearance_${caseSetId}`
-const canvasSnapshotStorageKey = `rag_mindmap_snapshots_${caseSetId}`
+let remoteSaveTimer = null
 const activeTab = ref('mind')
 const labelTab = ref('system')
 const customTagValue = ref('')
 const customToolbarTags = ref([])
+const metaLoaded = ref(false)
 const treeData = ref([])
 const selectedNode = ref(null)
 const selectedNodeIds = ref([])
@@ -430,8 +500,18 @@ const zoom = ref(1)
 const isMindmapViewportActive = ref(false)
 const contextMenuVisible = ref(false)
 const contextMenuPosition = reactive({ x: 0, y: 0 })
+const viewportState = reactive({
+  scrollLeft: 0,
+  scrollTop: 0,
+  clientWidth: 1,
+  clientHeight: 1,
+  scrollWidth: 1,
+  scrollHeight: 1,
+  nodes: []
+})
 const detailDrawerVisible = ref(false)
 const nodeDialogVisible = ref(false)
+const caseReviewDialogVisible = ref(false)
 const versionDrawerVisible = ref(false)
 const shortcutDialogVisible = ref(false)
 const snapshotDialogVisible = ref(false)
@@ -440,16 +520,23 @@ const noteDialogVisible = ref(false)
 const linkDialogVisible = ref(false)
 const imageDialogVisible = ref(false)
 const reviewDialogVisible = ref(false)
+const automationDialogVisible = ref(false)
 const noteEditingNode = ref(null)
 const linkEditingNode = ref(null)
 const imageEditingNode = ref(null)
 const reviewEditingNode = ref(null)
+const automationNode = ref(null)
+const automationTemplate = ref('pytest')
+const automationScript = ref('')
 const noteDraft = ref('')
 const reviewDraft = ref('')
 const linkForm = reactive({ title: '', url: '' })
 const imageForm = reactive({ title: '', url: '' })
+const caseReviewForm = reactive({ reviewerIds: [], dueAt: '', note: '' })
+const caseReviewRecords = ref([])
 const searchKeyword = ref('')
 const clipboardNode = ref(null)
+const draggingNode = ref(null)
 const undoStack = ref([])
 const redoStack = ref([])
 const applyingHistory = ref(false)
@@ -573,10 +660,26 @@ const zoomDotStyle = computed(() => ({
   top: `${12 + (zoom.value - 0.6) * 75}px`
 }))
 
-const miniMapWindowStyle = computed(() => ({
-  width: `${34 + (1.2 - zoom.value) * 18}px`,
-  height: `${20 + (1.2 - zoom.value) * 10}px`
-}))
+const miniMapLayout = computed(() => buildMiniMapLayout(filteredTreeData.value))
+const miniMapWindowStyle = computed(() => {
+  const bounds = getMiniMapBounds(filteredTreeData.value)
+  if (!bounds) {
+    return { left: '0px', top: '0px', width: '118px', height: '88px' }
+  }
+  const padding = 8
+  const mapWidth = 118 - padding * 2
+  const mapHeight = 88 - padding * 2
+  const width = Math.max(16, Math.min(mapWidth, (viewportState.clientWidth / bounds.width) * mapWidth))
+  const height = Math.max(12, Math.min(mapHeight, (viewportState.clientHeight / bounds.height) * mapHeight))
+  const left = Math.min(118 - width, Math.max(0, padding + ((viewportState.scrollLeft - bounds.minX) / bounds.width) * mapWidth))
+  const top = Math.min(88 - height, Math.max(0, padding + ((viewportState.scrollTop - bounds.minY) / bounds.height) * mapHeight))
+  return {
+    left: `${left}px`,
+    top: `${top}px`,
+    width: `${width}px`,
+    height: `${height}px`
+  }
+})
 
 const contextMenuStyle = computed(() => ({
   left: `${contextMenuPosition.x}px`,
@@ -589,6 +692,62 @@ function pushHistory(action) {
   }
   undoStack.value = [...undoStack.value, action].slice(-50)
   redoStack.value = []
+}
+
+function handleViewportChange(payload) {
+  Object.assign(viewportState, payload)
+}
+
+function buildMiniMapLayout(nodes) {
+  const bounds = getMiniMapBounds(nodes)
+  if (!bounds) {
+    return { nodes: [] }
+  }
+  const padding = 8
+  const mapWidth = 118 - padding * 2
+  const mapHeight = 88 - padding * 2
+  return {
+    nodes: bounds.visibleNodes.map(node => {
+      const meta = bounds.nodeMetaMap.get(node.id)
+      return {
+        id: node.id,
+        nodeType: meta.nodeType,
+        x: padding + ((node.x - bounds.minX) / bounds.width) * mapWidth,
+        y: padding + ((node.y - bounds.minY) / bounds.height) * mapHeight,
+        selected: node.id === selectedNode.value?.node_id || selectedNodeIds.value.includes(node.id)
+      }
+    })
+  }
+}
+
+function getMiniMapBounds(nodes) {
+  const nodeMetaMap = new Map()
+  collectMiniMapNodeMeta(nodes, nodeMetaMap)
+  const visibleNodes = viewportState.nodes.filter(node => nodeMetaMap.has(node.id))
+  if (!visibleNodes.length) {
+    return null
+  }
+  const minX = Math.min(...visibleNodes.map(node => node.x))
+  const maxX = Math.max(...visibleNodes.map(node => node.x))
+  const minY = Math.min(...visibleNodes.map(node => node.y))
+  const maxY = Math.max(...visibleNodes.map(node => node.y))
+  return {
+    nodeMetaMap,
+    visibleNodes,
+    minX,
+    minY,
+    width: Math.max(1, maxX - minX),
+    height: Math.max(1, maxY - minY)
+  }
+}
+
+function collectMiniMapNodeMeta(nodes, result) {
+  for (const node of nodes) {
+    result.set(node.node_id, { nodeType: node.node_type })
+    if (!collapsedNodeIds.value.includes(node.node_id)) {
+      collectMiniMapNodeMeta(node.children || [], result)
+    }
+  }
 }
 
 function cloneTagsMap() {
@@ -697,6 +856,7 @@ function getNodeSnapshot(node) {
 async function updateNodeBySnapshot(snapshot, changeNote) {
   return updateCaseNode(snapshot.node_id, {
     title: snapshot.title,
+    parent_id: snapshot.parent_id,
     node_type: snapshot.node_type,
     precondition: snapshot.precondition || null,
     test_steps: snapshot.test_steps || null,
@@ -753,8 +913,8 @@ async function applyHistoryAction(action, direction) {
     restoreTagsMap(direction === 'undo' ? action.before : action.after)
     return
   }
-  if (action.type === 'title') {
-    await updateNodeBySnapshot(direction === 'undo' ? action.before : action.after, direction === 'undo' ? '撤销标题编辑' : '重做标题编辑')
+  if (action.type === 'title' || action.type === 'update') {
+    await updateNodeBySnapshot(direction === 'undo' ? action.before : action.after, direction === 'undo' ? '撤销节点编辑' : '重做节点编辑')
     await loadTree()
     selectNodeOnly(findNodeById(treeData.value, action.nodeId))
     return
@@ -763,7 +923,7 @@ async function applyHistoryAction(action, direction) {
     if (direction === 'undo') {
       const node = findNodeById(treeData.value, action.nodeId)
       if (node) {
-        await deleteCaseNode(action.nodeId, { operator_id: getCurrentUserId() })
+        await deleteCaseNode(action.nodeId)
         await loadTree()
       }
       selectedNode.value = null
@@ -772,17 +932,11 @@ async function applyHistoryAction(action, direction) {
       return
     }
     const oldNodeId = action.nodeId
-    const createdNode = await createCaseNode({
-      case_set_id: caseSetId,
-      parent_id: action.parentId,
-      node_type: action.nodeType,
+    const createdNode = await createNodeFromHistoryPayload(action.payload || {
       title: action.title,
-      precondition: null,
-      test_steps: null,
-      expected_result: null,
-      priority: 'P1',
-      created_by: getCurrentUserId()
-    })
+      node_type: action.nodeType,
+      priority: 'P1'
+    }, action.parentId)
     remapHistoryNodeId(oldNodeId, createdNode.node_id)
     action.nodeId = createdNode.node_id
     await loadTree()
@@ -906,94 +1060,178 @@ function saveCustomTags() {
   window.localStorage.setItem(customTagStorageKey, JSON.stringify(customToolbarTags.value))
 }
 
-function loadNodeTags() {
-  try {
-    const savedTagsMap = JSON.parse(window.localStorage.getItem(nodeTagStorageKey) || '{}')
-    Object.keys(nodeTagsMap).forEach(nodeId => {
-      delete nodeTagsMap[nodeId]
-    })
-    Object.entries(savedTagsMap || {}).forEach(([nodeId, tags]) => {
-      const validTags = Array.isArray(tags) ? tags.filter(tag => tag?.text) : []
-      if (validTags.length) {
-        nodeTagsMap[nodeId] = validTags
+function scheduleRemoteSave() {
+  if (!metaLoaded.value) {
+    return
+  }
+  if (remoteSaveTimer) {
+    return
+  }
+  remoteSaveTimer = window.setTimeout(async () => {
+    remoteSaveTimer = null
+    await flushRemoteSave()
+  }, 600)
+}
+
+async function flushRemoteSave() {
+  const items = []
+  Object.entries(nodeTagsMap).forEach(([nodeId, tags]) => {
+    ;(tags || []).forEach(tag => {
+      if (tag?.text) {
+        items.push({ node_id: Number(nodeId), meta_type: 'tag', meta_key: String(tag.text), meta_value: { text: tag.text, color: tag.color || '' } })
       }
     })
+  })
+  Object.entries(nodeNotesMap).forEach(([nodeId, text]) => {
+    if (String(text || '').trim()) {
+      items.push({ node_id: Number(nodeId), meta_type: 'note', meta_value: { text } })
+    }
+  })
+  Object.entries(nodeLinksMap).forEach(([nodeId, link]) => {
+    if (link?.url) {
+      items.push({ node_id: Number(nodeId), meta_type: 'link', meta_value: link })
+    }
+  })
+  Object.entries(nodeImagesMap).forEach(([nodeId, image]) => {
+    if (image?.url) {
+      items.push({ node_id: Number(nodeId), meta_type: 'image', meta_value: image })
+    }
+  })
+  Object.entries(nodeReviewsMap).forEach(([nodeId, review]) => {
+    if (review?.text) {
+      items.push({ node_id: Number(nodeId), meta_type: 'review', meta_value: review })
+    }
+  })
+  try {
+    await saveCaseSetMetas(caseSetId, items)
   } catch {
-    Object.keys(nodeTagsMap).forEach(nodeId => {
-      delete nodeTagsMap[nodeId]
-    })
+    // 全局拦截器已提示错误，这里静默避免重复弹窗。
+  }
+}
+
+async function loadNodeMetasFromServer() {
+  try {
+    const result = await getCaseSetMetas(caseSetId)
+    const items = result.items || []
+    Object.keys(nodeTagsMap).forEach(nodeId => delete nodeTagsMap[nodeId])
+    Object.keys(nodeNotesMap).forEach(nodeId => delete nodeNotesMap[nodeId])
+    Object.keys(nodeLinksMap).forEach(nodeId => delete nodeLinksMap[nodeId])
+    Object.keys(nodeImagesMap).forEach(nodeId => delete nodeImagesMap[nodeId])
+    Object.keys(nodeReviewsMap).forEach(nodeId => delete nodeReviewsMap[nodeId])
+    for (const item of items) {
+      const nodeId = Number(item.node_id)
+      const value = item.meta_value || {}
+      if (item.meta_type === 'tag' && item.meta_key) {
+        nodeTagsMap[nodeId] = [...(nodeTagsMap[nodeId] || []), { text: item.meta_key, color: value.color || '#dbeafe' }]
+      } else if (item.meta_type === 'note') {
+        if (value.text) {
+          nodeNotesMap[nodeId] = value.text
+        }
+      } else if (item.meta_type === 'link') {
+        nodeLinksMap[nodeId] = value
+      } else if (item.meta_type === 'image') {
+        nodeImagesMap[nodeId] = value
+      } else if (item.meta_type === 'review') {
+        nodeReviewsMap[nodeId] = value
+      }
+    }
+    metaLoaded.value = true
+  } catch {
+    // 全局拦截器已提示错误。
   }
 }
 
 function saveNodeTags() {
-  const normalizedTagsMap = Object.fromEntries(
-    Object.entries(nodeTagsMap)
-      .map(([nodeId, tags]) => [nodeId, Array.isArray(tags) ? tags.filter(tag => tag?.text) : []])
-      .filter(([, tags]) => tags.length)
-  )
-  window.localStorage.setItem(nodeTagStorageKey, JSON.stringify(normalizedTagsMap))
-}
-
-function loadNodeNotes() {
-  try {
-    const savedNotes = JSON.parse(window.localStorage.getItem(nodeNoteStorageKey) || '{}')
-    Object.keys(nodeNotesMap).forEach(nodeId => {
-      delete nodeNotesMap[nodeId]
-    })
-    Object.entries(savedNotes || {}).forEach(([nodeId, note]) => {
-      const noteText = String(note || '').trim()
-      if (noteText) {
-        nodeNotesMap[nodeId] = noteText
-      }
-    })
-  } catch {
-    Object.keys(nodeNotesMap).forEach(nodeId => {
-      delete nodeNotesMap[nodeId]
-    })
-  }
+  scheduleRemoteSave()
 }
 
 function saveNodeNotes() {
-  window.localStorage.setItem(nodeNoteStorageKey, JSON.stringify(nodeNotesMap))
+  scheduleRemoteSave()
 }
 
-function loadPersistedMap(storageKey, targetMap) {
-  try {
-    const savedMap = JSON.parse(window.localStorage.getItem(storageKey) || '{}')
-    Object.keys(targetMap).forEach(nodeId => {
-      delete targetMap[nodeId]
-    })
-    Object.entries(savedMap || {}).forEach(([nodeId, value]) => {
-      if (value) {
-        targetMap[nodeId] = value
-      }
-    })
-  } catch {
-    Object.keys(targetMap).forEach(nodeId => {
-      delete targetMap[nodeId]
-    })
-  }
+function saveNodeLinks() {
+  scheduleRemoteSave()
 }
 
-function savePersistedMap(storageKey, targetMap) {
-  window.localStorage.setItem(storageKey, JSON.stringify(targetMap))
+function saveNodeImages() {
+  scheduleRemoteSave()
+}
+
+function saveNodeReviews() {
+  scheduleRemoteSave()
+}
+
+function loadNodeTags() {
+  // 节点元数据从服务端加载，见 loadNodeMetasFromServer。
+}
+
+function loadNodeNotes() {
+  // 节点元数据从服务端加载，见 loadNodeMetasFromServer。
+}
+
+function loadNodeLinks() {
+  // 节点元数据从服务端加载，见 loadNodeMetasFromServer。
+}
+
+function loadNodeImages() {
+  // 节点元数据从服务端加载，见 loadNodeMetasFromServer。
+}
+
+function loadNodeReviews() {
+  // 节点元数据从服务端加载，见 loadNodeMetasFromServer。
 }
 
 function clonePlainObject(value) {
   return JSON.parse(JSON.stringify(value || {}))
 }
 
-function loadCanvasSnapshots() {
+async function loadCanvasSnapshots() {
   try {
-    const savedSnapshots = JSON.parse(window.localStorage.getItem(canvasSnapshotStorageKey) || '[]')
-    canvasSnapshots.value = Array.isArray(savedSnapshots) ? savedSnapshots : []
+    canvasSnapshots.value = await listSnapshots(caseSetId)
   } catch {
     canvasSnapshots.value = []
   }
 }
 
 function saveCanvasSnapshots() {
-  window.localStorage.setItem(canvasSnapshotStorageKey, JSON.stringify(canvasSnapshots.value))
+  // 快照已由后端持久化，见 createCanvasSnapshot / deleteCanvasSnapshot。
+}
+
+async function loadCaseReviewRecords() {
+  try {
+    caseReviewRecords.value = await listReviews(caseSetId)
+  } catch {
+    caseReviewRecords.value = []
+  }
+}
+
+function saveCaseReviewRecords() {
+  // 评审记录已由后端持久化，见 submitCaseReview。
+}
+
+function openCaseReviewDialog() {
+  Object.assign(caseReviewForm, {
+    reviewerIds: [String(getCurrentUserId())],
+    dueAt: '',
+    note: '请重点检查用例前置条件、执行步骤、预期结果和异常分支是否完整。'
+  })
+  caseReviewDialogVisible.value = true
+}
+
+async function submitCaseReview() {
+  const reviewerIds = Array.from(new Set(caseReviewForm.reviewerIds.map(value => Number(String(value).trim())).filter(Number.isInteger).filter(value => value > 0)))
+  if (!reviewerIds.length) {
+    showWarning('请至少填写一个评审人ID')
+    return
+  }
+  await createReview(caseSetId, {
+    reviewer_ids: reviewerIds,
+    due_at: caseReviewForm.dueAt || null,
+    note: caseReviewForm.note.trim() || null
+  })
+  caseReviewRecords.value = await listReviews(caseSetId)
+  caseReviewDialogVisible.value = false
+  showSuccess(`已发起用例集评审，评审人 ${reviewerIds.join('、')}`)
 }
 
 async function createCanvasSnapshot() {
@@ -1008,10 +1246,9 @@ async function createCanvasSnapshot() {
   if (!result) {
     return
   }
-  const snapshot = {
-    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-    name: String(result.value || defaultName).trim() || defaultName,
-    created_at: new Date().toLocaleString(),
+  const name = String(result.value || defaultName).trim() || defaultName
+  const created = await createSnapshot(caseSetId, {
+    name,
     data: {
       nodeTagsMap: clonePlainObject(nodeTagsMap),
       nodeNotesMap: clonePlainObject(nodeNotesMap),
@@ -1021,30 +1258,30 @@ async function createCanvasSnapshot() {
       collapsedNodeIds: [...collapsedNodeIds.value],
       appearance: clonePlainObject(appearanceForm)
     }
-  }
-  canvasSnapshots.value = [snapshot, ...canvasSnapshots.value].slice(0, 20)
-  saveCanvasSnapshots()
+  })
+  canvasSnapshots.value = [created, ...canvasSnapshots.value].slice(0, 50)
   snapshotDialogVisible.value = true
   showSuccess('脑图版本快照已创建')
 }
 
 async function restoreCanvasSnapshot(snapshot) {
   await confirmAction(`确认恢复快照「${snapshot.name}」吗？当前页面标签、备注、链接、图片、评审和外观会被覆盖。`, '恢复脑图快照')
-  restoreTagsMap(snapshot.data.nodeTagsMap || {})
-  restorePersistedMap(nodeNotesMap, snapshot.data.nodeNotesMap || {})
-  restorePersistedMap(nodeLinksMap, snapshot.data.nodeLinksMap || {})
-  restorePersistedMap(nodeImagesMap, snapshot.data.nodeImagesMap || {})
-  restorePersistedMap(nodeReviewsMap, snapshot.data.nodeReviewsMap || {})
-  collapsedNodeIds.value = Array.isArray(snapshot.data.collapsedNodeIds) ? snapshot.data.collapsedNodeIds : []
-  Object.assign(appearanceForm, snapshot.data.appearance || {})
+  const data = snapshot.data_json || snapshot.data || {}
+  restoreTagsMap(data.nodeTagsMap || {})
+  restorePersistedMap(nodeNotesMap, data.nodeNotesMap || {})
+  restorePersistedMap(nodeLinksMap, data.nodeLinksMap || {})
+  restorePersistedMap(nodeImagesMap, data.nodeImagesMap || {})
+  restorePersistedMap(nodeReviewsMap, data.nodeReviewsMap || {})
+  collapsedNodeIds.value = Array.isArray(data.collapsedNodeIds) ? data.collapsedNodeIds : []
+  Object.assign(appearanceForm, data.appearance || {})
   handleSaveCanvas()
   showSuccess('脑图版本快照已恢复')
 }
 
 async function deleteCanvasSnapshot(snapshotId) {
   await confirmAction('确认删除这个脑图版本快照吗？')
-  canvasSnapshots.value = canvasSnapshots.value.filter(snapshot => snapshot.id !== snapshotId)
-  saveCanvasSnapshots()
+  await deleteSnapshot(caseSetId, snapshotId)
+  canvasSnapshots.value = canvasSnapshots.value.filter(snapshot => snapshot.snapshot_id !== snapshotId)
   showSuccess('脑图版本快照已删除')
 }
 
@@ -1192,30 +1429,6 @@ function loadCollapsedNodes() {
 
 function saveCollapsedNodes() {
   window.localStorage.setItem(collapsedNodeStorageKey, JSON.stringify(collapsedNodeIds.value))
-}
-
-function loadNodeLinks() {
-  loadPersistedMap(nodeLinkStorageKey, nodeLinksMap)
-}
-
-function saveNodeLinks() {
-  savePersistedMap(nodeLinkStorageKey, nodeLinksMap)
-}
-
-function loadNodeImages() {
-  loadPersistedMap(nodeImageStorageKey, nodeImagesMap)
-}
-
-function saveNodeImages() {
-  savePersistedMap(nodeImageStorageKey, nodeImagesMap)
-}
-
-function loadNodeReviews() {
-  loadPersistedMap(nodeReviewStorageKey, nodeReviewsMap)
-}
-
-function saveNodeReviews() {
-  savePersistedMap(nodeReviewStorageKey, nodeReviewsMap)
 }
 
 function isHttpUrl(url) {
@@ -1404,6 +1617,77 @@ function clearNodeReview() {
   reviewDialogVisible.value = false
 }
 
+function openAutomationDialog(node) {
+  if (!node) {
+    showWarning('请先选择一个用例节点')
+    return
+  }
+  automationNode.value = node
+  automationTemplate.value = 'pytest'
+  refreshAutomationScript()
+  automationDialogVisible.value = true
+}
+
+function refreshAutomationScript() {
+  if (!automationNode.value) {
+    automationScript.value = ''
+    return
+  }
+  if (automationTemplate.value === 'selenium') {
+    automationScript.value = buildSeleniumScript(automationNode.value)
+    return
+  }
+  if (automationTemplate.value === 'manual') {
+    automationScript.value = buildManualExecutionTemplate(automationNode.value)
+    return
+  }
+  automationScript.value = buildPytestScript(automationNode.value)
+}
+
+async function copyAutomationScript() {
+  if (!automationScript.value.trim()) {
+    showWarning('暂无可复制的脚本内容')
+    return
+  }
+  await navigator.clipboard.writeText(automationScript.value)
+  showSuccess('自动化脚本草稿已复制')
+}
+
+function buildPytestScript(node) {
+  const testName = toPythonTestName(node.title)
+  return `import pytest\n\n\ndef test_${testName}():\n    \"\"\"${escapeTripleQuotes(node.title)}\"\"\"\n    # 前置条件\n${formatPythonComments(node.precondition || '补充测试前置条件')}\n\n    # 测试步骤\n${formatPythonComments(node.test_steps || '补充测试步骤')}\n\n    actual_result = \"TODO: 执行被测功能后填写实际结果\"\n    expected_result = ${JSON.stringify(node.expected_result || '补充预期结果')}\n\n    assert expected_result in actual_result\n`
+}
+
+function buildSeleniumScript(node) {
+  const testName = toPythonTestName(node.title)
+  return `from selenium import webdriver\nfrom selenium.webdriver.common.by import By\n\n\ndef test_${testName}_ui():\n    driver = webdriver.Chrome()\n    try:\n        driver.get(\"http://localhost:5173\")\n\n        # 前置条件\n${formatPythonComments(node.precondition || '补充浏览器登录、环境准备等前置条件', 8)}\n\n        # 测试步骤\n${formatPythonComments(node.test_steps || '补充页面点击、输入、断言步骤', 8)}\n\n        expected_result = ${JSON.stringify(node.expected_result || '补充预期结果')}\n        assert expected_result\n    finally:\n        driver.quit()\n`
+}
+
+function buildManualExecutionTemplate(node) {
+  return `用例名称：${node.title}\n优先级：${node.priority || 'P1'}\n\n【前置条件】\n${node.precondition || '待补充'}\n\n【执行步骤】\n${node.test_steps || '待补充'}\n\n【预期结果】\n${node.expected_result || '待补充'}\n\n【执行记录】\n实际结果：\n缺陷描述：\n执行人：\n执行时间：\n`
+}
+
+function toPythonTestName(title) {
+  return String(title || 'case')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9一-龥]+/gi, '_')
+    .replace(/^_+|_+$/g, '') || 'case'
+}
+
+function formatPythonComments(text, indent = 4) {
+  const prefix = `${' '.repeat(indent)}# `
+  return String(text || '')
+    .split(/\r?\n/)
+    .filter(line => line.trim())
+    .map(line => `${prefix}${line.trim()}`)
+    .join('\n') || `${prefix}待补充`
+}
+
+function escapeTripleQuotes(text) {
+  return String(text || '').replace(/\"\"\"/g, '\\\"\\\"\\\"')
+}
+
 function openSearchDialog() {
   searchDialogVisible.value = true
 }
@@ -1476,6 +1760,59 @@ function expandNodeAncestors(nodeId) {
   }
   collapsedNodeIds.value = collapsedNodeIds.value.filter(collapsedNodeId => !ancestorIds.includes(collapsedNodeId))
   saveCollapsedNodes()
+}
+
+function handleNodeDragStart(node) {
+  draggingNode.value = node
+  selectNodeOnly(node)
+}
+
+async function handleNodeDrop(targetNode) {
+  const sourceNode = draggingNode.value
+  draggingNode.value = null
+  if (!sourceNode || !targetNode) {
+    return
+  }
+  if (sourceNode.node_id === targetNode.node_id) {
+    showWarning('不能把节点拖到自身下面')
+    return
+  }
+  if (isDescendantNode(sourceNode.node_id, targetNode.node_id)) {
+    showWarning('不能把节点拖到自己的子节点下面')
+    return
+  }
+  const currentParent = findParentNode(treeData.value, sourceNode.node_id)
+  if ((currentParent?.node_id ?? null) === targetNode.node_id) {
+    showWarning('目标节点已经是当前父节点')
+    return
+  }
+  const freshSourceNode = findNodeById(treeData.value, sourceNode.node_id) || sourceNode
+  const before = getNodeSnapshot(freshSourceNode)
+  const after = {
+    ...before,
+    parent_id: targetNode.node_id,
+    sort_order: targetNode.children?.length || 0
+  }
+  await updateNodeBySnapshot(after, `拖拽移动到「${targetNode.title}」下面`)
+  pushHistory({
+    type: 'update',
+    nodeId: sourceNode.node_id,
+    before,
+    after
+  })
+  collapsedNodeIds.value = collapsedNodeIds.value.filter(nodeId => nodeId !== targetNode.node_id)
+  saveCollapsedNodes()
+  await loadTree()
+  selectNodeOnly(findNodeById(treeData.value, sourceNode.node_id))
+  showSuccess(`已移动到「${targetNode.title}」下面`)
+}
+
+function isDescendantNode(parentNodeId, possibleChildNodeId) {
+  const parentNode = findNodeById(treeData.value, parentNodeId)
+  if (!parentNode) {
+    return false
+  }
+  return Boolean(findNodeById(parentNode.children || [], possibleChildNodeId))
 }
 
 function selectRelativeNode(direction) {
@@ -1553,7 +1890,15 @@ async function pasteClipboardNode() {
   if (!selectedNode.value || !clipboardNode.value) {
     return
   }
-  const created = await createNodeFromClipboard(clipboardNode.value, selectedNode.value.node_id)
+  const parentId = selectedNode.value.node_id
+  const payload = cloneNodePayload(clipboardNode.value)
+  const created = await createNodeFromClipboard(payload, parentId)
+  pushHistory({
+    type: 'create',
+    nodeId: created.node_id,
+    parentId,
+    payload
+  })
   await loadTree()
   selectedNode.value = findNodeById(treeData.value, created.node_id) || created
   selectedNodeIds.value = [selectedNode.value.node_id]
@@ -1668,8 +2013,15 @@ async function createInstantNode(parentId, nodeType) {
     type: 'create',
     nodeId: createdNode.node_id,
     parentId,
-    nodeType,
-    title: '新建节点'
+    payload: {
+      title: '新建节点',
+      node_type: nodeType,
+      precondition: null,
+      test_steps: null,
+      expected_result: null,
+      priority: 'P1',
+      children: []
+    }
   })
   await loadTree()
   selectedNode.value = findNodeById(treeData.value, createdNode.node_id) || createdNode
@@ -1687,6 +2039,7 @@ function handleSaveCanvas() {
   saveNodeReviews()
   saveCollapsedNodes()
   saveAppearanceSettings()
+  flushRemoteSave()
   showSuccess('当前脑图标签、备注、链接、图片、评审、折叠状态和外观已保存')
 }
 
@@ -1708,7 +2061,20 @@ function isEditingTarget(target) {
 }
 
 function handleKeydown(event) {
+  const key = event.key.toLowerCase()
+  const isCtrl = event.ctrlKey || event.metaKey
   if (isEditingTarget(event.target)) {
+    const isInlineNodeEditor = Boolean(event.target?.closest?.('.mind-node'))
+    if (isInlineNodeEditor && isCtrl && key === 'z') {
+      event.preventDefault()
+      undoLastAction()
+      return
+    }
+    if (isInlineNodeEditor && isCtrl && key === 'y') {
+      event.preventDefault()
+      redoLastAction()
+      return
+    }
     return
   }
   if (event.key === 'Escape') {
@@ -1720,15 +2086,13 @@ function handleKeydown(event) {
     linkDialogVisible.value = false
     imageDialogVisible.value = false
     reviewDialogVisible.value = false
+    automationDialogVisible.value = false
     editingNodeId.value = null
     return
   }
-  if (shortcutDialogVisible.value || snapshotDialogVisible.value || nodeDialogVisible.value || noteDialogVisible.value || linkDialogVisible.value || imageDialogVisible.value || reviewDialogVisible.value || versionDrawerVisible.value || searchDialogVisible.value) {
+  if (shortcutDialogVisible.value || snapshotDialogVisible.value || nodeDialogVisible.value || noteDialogVisible.value || linkDialogVisible.value || imageDialogVisible.value || reviewDialogVisible.value || automationDialogVisible.value || versionDrawerVisible.value || searchDialogVisible.value) {
     return
   }
-
-  const key = event.key.toLowerCase()
-  const isCtrl = event.ctrlKey || event.metaKey
 
   if (isCtrl && (event.key === '=' || event.key === '+' || event.key === '-')) {
     if (!isMindmapViewportActive.value) {
@@ -1877,6 +2241,10 @@ async function updateNodeSortOrder(node, sortOrder) {
 }
 
 async function createNodeFromClipboard(node, parentId) {
+  return createNodeFromHistoryPayload(node, parentId)
+}
+
+async function createNodeFromHistoryPayload(node, parentId) {
   const created = await createCaseNode({
     case_set_id: caseSetId,
     parent_id: parentId,
@@ -1886,11 +2254,11 @@ async function createNodeFromClipboard(node, parentId) {
     test_steps: node.test_steps || null,
     expected_result: node.expected_result || null,
     priority: node.priority || 'P1',
-    sort_order: 0,
+    sort_order: node.sort_order ?? 0,
     created_by: getCurrentUserId()
   })
   for (const child of node.children || []) {
-    await createNodeFromClipboard(child, created.node_id)
+    await createNodeFromHistoryPayload(child, created.node_id)
   }
   return created
 }
@@ -1937,28 +2305,40 @@ async function handleSaveNode() {
   savingNode.value = true
   try {
     if (dialogMode.value === 'create') {
-      await createCaseNode({
-        case_set_id: caseSetId,
-        parent_id: parentIdForCreate.value,
-        node_type: nodeForm.node_type,
+      const payload = {
         title: nodeForm.title,
+        node_type: nodeForm.node_type,
         precondition: nodeForm.precondition || null,
         test_steps: nodeForm.test_steps || null,
         expected_result: nodeForm.expected_result || null,
         priority: nodeForm.priority,
-        created_by: getCurrentUserId()
+        children: []
+      }
+      const createdNode = await createNodeFromHistoryPayload(payload, parentIdForCreate.value)
+      pushHistory({
+        type: 'create',
+        nodeId: createdNode.node_id,
+        parentId: parentIdForCreate.value,
+        payload
       })
       showSuccess('节点创建成功')
     } else {
-      await updateCaseNode(selectedNode.value.node_id, {
+      const before = getNodeSnapshot(selectedNode.value)
+      const after = {
+        ...before,
         title: nodeForm.title,
         node_type: nodeForm.node_type,
         precondition: nodeForm.precondition || null,
         test_steps: nodeForm.test_steps || null,
         expected_result: nodeForm.expected_result || null,
-        priority: nodeForm.priority,
-        updated_by: getCurrentUserId(),
-        change_note: nodeForm.change_note || '前端编辑节点'
+        priority: nodeForm.priority
+      }
+      await updateNodeBySnapshot(after, nodeForm.change_note || '前端编辑节点')
+      pushHistory({
+        type: 'update',
+        nodeId: selectedNode.value.node_id,
+        before,
+        after
       })
       showSuccess('节点修改成功，已生成历史版本')
     }
@@ -1971,7 +2351,7 @@ async function handleSaveNode() {
 
 async function handleDeleteNode() {
   await confirmAction(`确认删除节点「${selectedNode.value.title}」吗？如果有子节点也会一起逻辑删除。`)
-  await deleteCaseNode(selectedNode.value.node_id, { operator_id: getCurrentUserId() })
+  await deleteCaseNode(selectedNode.value.node_id)
   showSuccess('节点删除成功，历史版本已保留')
   selectedNode.value = null
   selectedNodeIds.value = []
@@ -2025,20 +2405,21 @@ function getSiblings(node) {
 
 onMounted(() => {
   loadCustomTags()
-  loadNodeTags()
-  loadNodeNotes()
-  loadNodeLinks()
-  loadNodeImages()
-  loadNodeReviews()
   loadCollapsedNodes()
   loadAppearanceSettings()
+  loadNodeMetasFromServer()
   loadCanvasSnapshots()
+  loadCaseReviewRecords()
   loadTree()
   window.addEventListener('keydown', handleKeydown)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleKeydown)
+  if (remoteSaveTimer) {
+    window.clearTimeout(remoteSaveTimer)
+    flushRemoteSave()
+  }
 })
 </script>
 
@@ -2303,16 +2684,43 @@ onBeforeUnmount(() => {
   bottom: 52px;
   width: 118px;
   height: 88px;
+  overflow: hidden;
   background: #ffffff;
   border: 1px solid #dbeafe;
+  border-radius: 7px;
   box-shadow: 0 3px 14px rgba(15, 23, 42, 0.12);
 }
 
-.mini-map-lines {
-  width: 70px;
-  height: 76px;
-  margin: 6px auto;
-  background: repeating-linear-gradient(to bottom, #93c5fd 0, #93c5fd 1px, transparent 1px, transparent 5px);
+.mini-map-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.mini-map-node-dot {
+  fill: #60a5fa;
+  stroke: #ffffff;
+  stroke-width: 0.8;
+}
+
+.mini-map-node-dot.case {
+  fill: #22c55e;
+}
+
+.mini-map-node-dot.selected {
+  fill: #ef4444;
+  stroke: #991b1b;
+  stroke-width: 1;
+}
+
+.mini-map-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #94a3b8;
+  font-size: 12px;
 }
 
 .mini-map-window {
@@ -2448,10 +2856,57 @@ onBeforeUnmount(() => {
 }
 
 .note-dialog-body,
-.meta-dialog-body {
+.meta-dialog-body,
+.automation-dialog-body,
+.case-review-body {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.wide-select {
+  width: 100%;
+}
+
+.review-history {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.review-history-title {
+  color: #334155;
+  font-weight: 700;
+}
+
+.review-history-item {
+  display: grid;
+  grid-template-columns: 110px 1fr 180px;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.review-history-item small {
+  grid-column: 1 / -1;
+  color: #64748b;
+}
+
+.automation-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.automation-dialog-body :deep(.el-textarea__inner) {
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.55;
 }
 
 .note-node-title {

@@ -23,7 +23,7 @@ def import_xmind_file(db: Session, file: UploadFile, created_by: int) -> dict:
     if not file.filename or not file.filename.lower().endswith(".xmind"):
         raise HTTPException(status_code=400, detail="只支持上传.xmind文件")
 
-    upload_dir = Path(settings.upload_root_dir) / "xmind"
+    upload_dir = Path(settings.upload_root) / "xmind"
     upload_dir.mkdir(parents=True, exist_ok=True)
 
     saved_name = f"{uuid.uuid4()}_{file.filename}"
@@ -213,7 +213,7 @@ def export_case_set_to_xmind(
         }
     ]
 
-    export_dir = Path(settings.export_root_dir) / "xmind"
+    export_dir = Path(settings.export_root) / "xmind"
     export_dir.mkdir(parents=True, exist_ok=True)
     export_path = export_dir / f"case_set_{case_set_id}_{uuid.uuid4().hex}.xmind"
 

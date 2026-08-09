@@ -7,6 +7,15 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 ENV_FILE = BACKEND_DIR / ".env"
+PROJECT_ROOT = BACKEND_DIR.parent
+
+
+def _resolve_storage_path(value: str, default_relative: str) -> str:
+    """存储路径优先读 .env；若为空则相对项目根目录生成绝对路径。"""
+    path_text = (value or "").strip()
+    if path_text:
+        return path_text
+    return str(PROJECT_ROOT / default_relative)
 
 
 class Settings(BaseSettings):
@@ -23,12 +32,12 @@ class Settings(BaseSettings):
     mysql_password: str = ""
     mysql_database: str = "rag_mindmap_test_platform"
 
-    faiss_root_dir: str = "D:/csdn_projects/rag_mindmap_platform/storage/faiss"
-    upload_root_dir: str = "D:/csdn_projects/rag_mindmap_platform/storage/uploads"
-    export_root_dir: str = "D:/csdn_projects/rag_mindmap_platform/storage/exports"
+    faiss_root_dir: str = ""
+    upload_root_dir: str = ""
+    export_root_dir: str = ""
 
     embedding_model_name: str = "BAAI/bge-small-zh-v1.5"
-    hf_home: str = "D:/csdn_projects/rag_mindmap_platform/storage/models/huggingface"
+    hf_home: str = ""
     rag_chunk_size: int = 500
     rag_chunk_overlap: int = 80
     rag_top_k: int = 5
@@ -36,6 +45,9 @@ class Settings(BaseSettings):
     deepseek_base_url: str = "https://api.deepseek.com/v1"
     deepseek_model: str = "deepseek-v4-flash"
     deepseek_api_key: str = ""
+
+    auth_secret_key: str = "rag-mindmap-dev-secret-change-me"
+    auth_token_expire_minutes: int = 60 * 24
 
     model_config = SettingsConfigDict(
         env_file=ENV_FILE,
@@ -54,6 +66,22 @@ class Settings(BaseSettings):
             f"@{self.mysql_host}:{self.mysql_port}/{safe_database}"
             "?charset=utf8mb4"
         )
+
+    @property
+    def faiss_root(self) -> str:
+        return _resolve_storage_path(self.faiss_root_dir, "storage/faiss")
+
+    @property
+    def upload_root(self) -> str:
+        return _resolve_storage_path(self.upload_root_dir, "storage/uploads")
+
+    @property
+    def export_root(self) -> str:
+        return _resolve_storage_path(self.export_root_dir, "storage/exports")
+
+    @property
+    def hf_home_dir(self) -> str:
+        return _resolve_storage_path(self.hf_home, "storage/models/huggingface")
 
 
 @lru_cache

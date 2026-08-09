@@ -10,7 +10,7 @@ from app.schemas.task import ExecutionUpdate, TaskCreate
 from app.services.case_service import ensure_user_exists
 
 
-VALID_EXECUTION_STATUS = {"not_run", "passed", "failed", "blocked"}
+VALID_EXECUTION_STATUS = {"not_run", "passed", "failed", "blocked", "skipped"}
 
 
 def create_task(db: Session, data: TaskCreate) -> dict:
@@ -74,15 +74,22 @@ def create_task(db: Session, data: TaskCreate) -> dict:
     return get_task_detail(db, task.task_id)
 
 
-def list_tasks(db: Session, page: int, page_size: int) -> list[TestTask]:
+def list_tasks(db: Session, page: int, page_size: int) -> dict:
+    conditions = [TestTask.is_deleted == 0]
+    total = db.scalar(select(func.count()).select_from(TestTask).where(*conditions)) or 0
     statement = (
         select(TestTask)
-        .where(TestTask.is_deleted == 0)
+        .where(*conditions)
         .order_by(TestTask.task_id.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
     )
-    return list(db.scalars(statement).all())
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "items": list(db.scalars(statement).all()),
+    }
 
 
 def get_task_detail(db: Session, task_id: int) -> dict:
@@ -168,7 +175,7 @@ def update_execution(db: Session, execution_id: int, data: ExecutionUpdate) -> T
     ensure_user_exists(db, data.executor_id)
 
     if data.execution_status not in VALID_EXECUTION_STATUS:
-        raise HTTPException(status_code=400, detail="execution_status只能是not_run/passed/failed/blocked")
+        raise HTTPException(status_code=400, detail="execution_status只能是not_run/passed/failed/blocked/skipped")
 
     execution = db.get(TestExecutionRecord, execution_id)
     if not execution:
@@ -207,6 +214,31 @@ def refresh_task_status(db: Session, task_id: int) -> None:
     else:
         task.status = "running"
     db.commit()
+
+
+def cancel_task(db: Session, task_id: int, operator_id: int) -> dict:
+    ensure_user_exists(db, operator_id)
+    task = db.get(TestTask, task_id)
+    if not task or task.is_deleted == 1:
+        raise HTTPException(status_code=404, detail="测试任务不存在")
+    if task.status in {"finished", "cancelled"}:
+        raise HTTPException(status_code=400, detail="已完成或已取消的任务不能再次取消")
+    task.status = "cancelled"
+    task.updated_by = operator_id
+    db.commit()
+    return {"message": "测试任务已取消", "task_id": task_id}
+
+
+def delete_task(db: Session, task_id: int, operator_id: int) -> dict:
+    ensure_user_exists(db, operator_id)
+    task = db.get(TestTask, task_id)
+    if not task or task.is_deleted == 1:
+        raise HTTPException(status_code=404, detail="测试任务不存在")
+    task.is_deleted = 1
+    task.status = "cancelled"
+    task.updated_by = operator_id
+    db.commit()
+    return {"message": "测试任务已删除", "task_id": task_id}
 
 
 def count_execution_status(db: Session, task_id: int, status: str) -> int:

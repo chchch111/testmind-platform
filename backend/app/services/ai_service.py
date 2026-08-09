@@ -1,5 +1,6 @@
 import json
 import re
+import socket
 import urllib.error
 import urllib.request
 
@@ -105,11 +106,32 @@ def generate_test_cases(db: Session, data: AiGenerateRequest) -> dict:
             "generated_text": generated_text,
         }
     except Exception as error:
+        safe_message = safe_ai_error_message(error)
         generation_record.generated_text = generation_record.generated_text or ""
         generation_record.generation_status = "failed"
-        generation_record.error_message = str(error)
+        generation_record.error_message = safe_message
         db.commit()
-        raise HTTPException(status_code=500, detail=f"AI生成失败：{error}") from error
+        raise HTTPException(status_code=500, detail=safe_message) from error
+
+
+def safe_ai_error_message(error: Exception) -> str:
+    if isinstance(error, HTTPException):
+        return str(error.detail)
+
+    text = str(error)
+    if "DEEPSEEK_API_KEY" in text:
+        return "AI服务未配置，请检查DeepSeek API Key"
+    if "HTTP 401" in text or "HTTP 403" in text:
+        return "AI服务鉴权失败，请检查DeepSeek API Key"
+    if "HTTP 429" in text:
+        return "AI服务请求过于频繁，请稍后重试"
+    if "HTTP 5" in text:
+        return "AI服务暂时不可用，请稍后重试"
+    if "超时" in text or "network" in text.lower() or "timed out" in text.lower():
+        return "AI服务响应超时，请稍后重试或缩短需求文本"
+    if "JSON" in text or "json" in text or "合法" in text:
+        return "AI返回内容格式不符合要求，请重试"
+    return "AI生成失败，请检查后端日志"
 
 
 def list_generation_records(db: Session) -> list[AiGenerationRecord]:
@@ -189,8 +211,9 @@ def call_deepseek(user_prompt: str) -> str:
         with urllib.request.urlopen(request, timeout=120) as response:
             response_json = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as error:
-        error_body = error.read().decode("utf-8", errors="replace")
-        raise ValueError(f"DeepSeek接口请求失败：HTTP {error.code} {error_body}") from error
+        raise ValueError(f"DeepSeek接口请求失败：HTTP {error.code}") from error
+    except (urllib.error.URLError, TimeoutError, socket.timeout) as error:
+        raise ValueError("DeepSeek接口请求超时或网络不可用") from error
 
     return response_json["choices"][0]["message"]["content"]
 

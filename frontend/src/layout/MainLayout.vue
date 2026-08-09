@@ -10,6 +10,7 @@
         <el-menu-item index="/case-sets">用例集管理</el-menu-item>
         <el-menu-item index="/knowledge-bases">知识库管理</el-menu-item>
         <el-menu-item index="/ai-generate">AI生成用例</el-menu-item>
+        <el-menu-item v-if="isAdmin" index="/permissions">权限管理</el-menu-item>
         <el-menu-item index="/tasks">测试任务管理</el-menu-item>
         <el-menu-item index="/executor">执行工作台</el-menu-item>
       </el-menu>
@@ -22,8 +23,11 @@
           <div class="header-desc">基于大模型与RAG的思维导图测试用例自动生成与管理平台</div>
         </div>
         <div class="user-box">
-          <span>当前模拟用户ID</span>
-          <el-input-number v-model="currentUserId" :min="1" size="small" @change="saveUserId" />
+          <div class="user-info">
+            <strong>{{ currentUser?.real_name || currentUser?.username || '未登录' }}</strong>
+            <span>{{ currentUser?.username }} · {{ currentUser?.role_code }}</span>
+          </div>
+          <el-button size="small" @click="handleLogout">退出登录</el-button>
         </div>
       </el-header>
 
@@ -35,14 +39,36 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
-import { getCurrentUserId, setCurrentUserId } from '../utils/storage'
+import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { getCurrentUserProfile, logout } from '../api/auth'
+import { clearAuth, getCurrentUser, setCurrentUser } from '../utils/storage'
 
-const currentUserId = ref(getCurrentUserId())
+const router = useRouter()
+const currentUser = ref(getCurrentUser())
+const isAdmin = computed(() => currentUser.value?.role_code === 'admin')
 
-function saveUserId(value) {
-  setCurrentUserId(value)
+async function refreshCurrentUser() {
+  try {
+    const user = await getCurrentUserProfile()
+    setCurrentUser(user)
+    currentUser.value = user
+  } catch {
+    clearAuth()
+    router.replace('/login')
+  }
 }
+
+async function handleLogout() {
+  try {
+    await logout()
+  } finally {
+    clearAuth()
+    router.replace('/login')
+  }
+}
+
+onMounted(refreshCurrentUser)
 </script>
 
 <style scoped>
@@ -113,8 +139,25 @@ function saveUserId(value) {
 .user-box {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   color: #475569;
+}
+
+.user-info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.user-info strong {
+  color: #0f172a;
+  font-size: 14px;
+}
+
+.user-info span {
+  color: #64748b;
+  font-size: 12px;
 }
 
 .app-main {

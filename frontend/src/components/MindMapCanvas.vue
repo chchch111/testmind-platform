@@ -7,6 +7,7 @@
     @mouseleave="handleMouseLeave"
     @mousedown="handleMouseDown"
     @wheel="handleWheel"
+    @scroll="emitViewportChange"
     @dblclick.self="resetView"
   >
     <div v-if="selectionVisible" class="selection-rect" :style="selectionRectStyle" />
@@ -36,6 +37,9 @@
             @image-click="emitImageClick"
             @review-click="emitReviewClick"
             @toggle-collapse="emitToggleCollapse"
+            @node-drag-start="emitNodeDragStart"
+            @node-drop="emitNodeDrop"
+            @node-drag-end="emitNodeDragEnd"
           />
         </div>
       </div>
@@ -115,7 +119,11 @@ const emit = defineEmits([
   'zoom-in',
   'zoom-out',
   'reset-view',
-  'viewport-active-change'
+  'viewport-active-change',
+  'viewport-change',
+  'node-drag-start',
+  'node-drop',
+  'node-drag-end'
 ])
 
 const scrollRef = ref(null)
@@ -189,16 +197,56 @@ function emitToggleCollapse(node) {
   emit('toggle-collapse', node)
 }
 
+function emitNodeDragStart(node) {
+  emit('node-drag-start', node)
+}
+
+function emitNodeDrop(node) {
+  emit('node-drop', node)
+}
+
+function emitNodeDragEnd() {
+  emit('node-drag-end')
+}
+
 function centerRootNode() {
   if (!scrollRef.value) {
     return
   }
   const rootNode = scrollRef.value.querySelector('.root-row .mind-node')
   if (!rootNode) {
+    emitViewportChange()
     return
   }
   scrollRef.value.scrollLeft = rootNode.offsetLeft - scrollRef.value.clientWidth / 2 + rootNode.offsetWidth / 2
   scrollRef.value.scrollTop = rootNode.offsetTop - scrollRef.value.clientHeight / 2 + rootNode.offsetHeight / 2
+  emitViewportChange()
+}
+
+function emitViewportChange() {
+  if (!scrollRef.value) {
+    return
+  }
+  const scrollRect = scrollRef.value.getBoundingClientRect()
+  const nodes = Array.from(scrollRef.value.querySelectorAll('.mind-node[data-node-id]')).map(element => {
+    const rect = element.getBoundingClientRect()
+    return {
+      id: Number(element.dataset.nodeId),
+      x: rect.left - scrollRect.left + scrollRef.value.scrollLeft + rect.width / 2,
+      y: rect.top - scrollRect.top + scrollRef.value.scrollTop + rect.height / 2,
+      width: rect.width,
+      height: rect.height
+    }
+  })
+  emit('viewport-change', {
+    scrollLeft: scrollRef.value.scrollLeft,
+    scrollTop: scrollRef.value.scrollTop,
+    clientWidth: scrollRef.value.clientWidth,
+    clientHeight: scrollRef.value.clientHeight,
+    scrollWidth: scrollRef.value.scrollWidth,
+    scrollHeight: scrollRef.value.scrollHeight,
+    nodes
+  })
 }
 
 async function centerRootNodeAfterRender() {
@@ -245,6 +293,7 @@ function handleMouseMove(event) {
   }
   scrollRef.value.scrollLeft = dragState.scrollLeft - (event.clientX - dragState.startX)
   scrollRef.value.scrollTop = dragState.scrollTop - (event.clientY - dragState.startY)
+  emitViewportChange()
 }
 
 function startBoxSelection(event) {
@@ -313,13 +362,29 @@ function resetView() {
 }
 
 watch(
-  () => props.treeData.map(node => node.node_id).join(','),
+  () => JSON.stringify(props.treeData),
   value => {
     if (value) {
       centerRootNodeAfterRender()
     }
   },
   { immediate: true }
+)
+
+watch(
+  () => props.collapsedNodeIds.join(','),
+  async () => {
+    await nextTick()
+    window.requestAnimationFrame(emitViewportChange)
+  }
+)
+
+watch(
+  () => props.zoom,
+  async () => {
+    await nextTick()
+    window.requestAnimationFrame(emitViewportChange)
+  }
 )
 
 onBeforeUnmount(() => {

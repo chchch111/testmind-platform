@@ -17,7 +17,9 @@
         <el-table-column label="状态" width="100">
           <template #default="{ row }">{{ STATUS_TEXT[row.status] || row.status }}</template>
         </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="190" />
+        <el-table-column label="创建时间" width="190">
+          <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
+        </el-table-column>
         <el-table-column label="操作" width="160" fixed="right">
           <template #default="{ row }">
             <el-button size="small" type="primary" @click="selectAndScroll(row)">管理</el-button>
@@ -31,15 +33,41 @@
         <div class="page-card">
           <h2>添加知识资料</h2>
           <p class="section-desc">当前知识库：{{ selectedKnowledgeBase.name }}</p>
-          <el-form label-width="90px">
-            <el-form-item label="资料名称">
-              <el-input v-model="sourceForm.source_name" placeholder="例如：摄像头夜视测试规范" />
-            </el-form-item>
-            <el-form-item label="资料正文">
-              <el-input v-model="sourceForm.content_text" type="textarea" :rows="8" placeholder="粘贴硬件测试规范、历史测试文档或XMind用例文本" />
-            </el-form-item>
-          </el-form>
-          <el-button type="primary" :loading="addingSource" @click="handleAddSource">保存资料</el-button>
+          <el-tabs v-model="sourceTab">
+            <el-tab-pane label="手动粘贴" name="manual">
+              <el-form label-width="90px">
+                <el-form-item label="资料名称">
+                  <el-input v-model="sourceForm.source_name" placeholder="例如：摄像头夜视测试规范" />
+                </el-form-item>
+                <el-form-item label="资料正文">
+                  <el-input v-model="sourceForm.content_text" type="textarea" :rows="6" placeholder="粘贴硬件测试规范、历史测试文档或XMind用例文本" />
+                </el-form-item>
+              </el-form>
+              <el-button type="primary" :loading="addingSource" @click="handleAddSource">保存资料</el-button>
+            </el-tab-pane>
+
+            <el-tab-pane label="上传文件" name="upload">
+              <el-form label-width="90px">
+                <el-form-item label="文件">
+                  <input ref="fileInputRef" type="file" accept=".txt,.md,.xmind" @change="handleFileChange" />
+                </el-form-item>
+              </el-form>
+              <p class="section-desc">支持 .txt / .md 文本文件，以及新版 .xmind 用例文件。系统会抽取纯文本作为知识来源，之后需点击“构建索引”。</p>
+              <el-button type="primary" :loading="uploadingSource" :disabled="!selectedFile" @click="handleUploadSource">上传并解析</el-button>
+            </el-tab-pane>
+
+            <el-tab-pane label="从用例集导入" name="caseSet">
+              <el-form label-width="90px">
+                <el-form-item label="用例集">
+                  <el-select v-model="importCaseSetId" filterable placeholder="请选择用例集" class="wide-select">
+                    <el-option v-for="caseSet in caseSets" :key="caseSet.case_set_id" :label="`#${caseSet.case_set_id} ${caseSet.name}`" :value="caseSet.case_set_id" />
+                  </el-select>
+                </el-form-item>
+              </el-form>
+              <p class="section-desc">把已有用例集的树形节点文本导入为知识来源，便于复用历史用例。</p>
+              <el-button type="primary" :loading="importingSource" :disabled="!importCaseSetId" @click="handleImportCaseSet">导入为知识来源</el-button>
+            </el-tab-pane>
+          </el-tabs>
         </div>
       </el-col>
 
@@ -73,15 +101,59 @@
       </el-form>
       <el-button type="primary" :loading="searching" @click="handleSearch">开始检索</el-button>
 
+      <div v-if="searchResult.length" class="search-summary-grid">
+        <div class="search-summary-card">
+          <span>命中片段</span>
+          <strong>{{ searchResult.length }}</strong>
+        </div>
+        <div class="search-summary-card">
+          <span>最高相似度</span>
+          <strong>{{ topSearchScore }}</strong>
+        </div>
+        <div class="search-summary-card">
+          <span>平均相似度</span>
+          <strong>{{ averageSearchScore }}</strong>
+        </div>
+      </div>
+
       <el-table v-if="searchResult.length" class="result-box" :data="searchResult" border>
         <el-table-column prop="chunk_id" label="chunk_id" width="100" />
         <el-table-column prop="source_id" label="source_id" width="100" />
         <el-table-column label="score" width="120">
           <template #default="{ row }">{{ Number(row.score).toFixed(4) }}</template>
         </el-table-column>
-        <el-table-column prop="chunk_text" label="命中文本" min-width="360" />
+        <el-table-column prop="chunk_text" label="命中文本" min-width="360" show-overflow-tooltip />
+        <el-table-column label="操作" width="160" fixed="right">
+          <template #default="{ row }">
+            <el-button size="small" @click="openChunkDetail(row)">详情</el-button>
+            <el-button size="small" type="primary" @click="copyChunkText(row)">复制</el-button>
+          </template>
+        </el-table-column>
       </el-table>
     </div>
+
+    <el-dialog v-model="chunkDialogVisible" title="命中知识片段详情" width="720px">
+      <div v-if="activeChunk" class="chunk-detail-body">
+        <el-descriptions :column="2" border>
+          <el-descriptions-item label="chunk_id">{{ activeChunk.chunk_id }}</el-descriptions-item>
+          <el-descriptions-item label="source_id">{{ activeChunk.source_id }}</el-descriptions-item>
+          <el-descriptions-item label="相似度">{{ Number(activeChunk.score).toFixed(6) }}</el-descriptions-item>
+          <el-descriptions-item label="知识库">{{ selectedKnowledgeBase?.name }}</el-descriptions-item>
+        </el-descriptions>
+        <div class="chunk-section">
+          <div class="chunk-title">命中文本</div>
+          <div class="chunk-text">{{ activeChunk.chunk_text }}</div>
+        </div>
+        <div class="chunk-section">
+          <div class="chunk-title">元数据</div>
+          <pre class="metadata-preview">{{ formatMetadata(activeChunk.metadata) }}</pre>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="chunkDialogVisible = false">关闭</el-button>
+        <el-button type="primary" @click="copyChunkText(activeChunk)">复制片段</el-button>
+      </template>
+    </el-dialog>
 
     <el-dialog v-model="createDialogVisible" title="创建知识库" width="560px">
       <el-form label-width="90px">
@@ -107,23 +179,34 @@
 </template>
 
 <script setup>
-import { nextTick, onMounted, reactive, ref } from 'vue'
-import { addManualSource, buildIndex, createKnowledgeBase, listKnowledgeBases, searchKnowledgeBase } from '../api/rag'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { addManualSource, buildIndex, createKnowledgeBase, importCaseSetAsSource, listKnowledgeBases, searchKnowledgeBase, uploadKnowledgeSourceFile } from '../api/rag'
+import { listCaseSets } from '../api/case'
 import { STATUS_TEXT } from '../utils/constants'
+import { formatDateTime } from '../utils/format'
 import { showSuccess, showWarning } from '../utils/message'
 import { getCurrentUserId } from '../utils/storage'
 
 const loading = ref(false)
 const creating = ref(false)
 const addingSource = ref(false)
+const uploadingSource = ref(false)
+const importingSource = ref(false)
 const building = ref(false)
 const searching = ref(false)
 const createDialogVisible = ref(false)
+const chunkDialogVisible = ref(false)
 const knowledgeBases = ref([])
 const selectedKnowledgeBase = ref(null)
+const activeChunk = ref(null)
 const buildResult = ref(null)
 const buildStageText = ref('准备构建索引...')
 const searchResult = ref([])
+const sourceTab = ref('manual')
+const fileInputRef = ref(null)
+const selectedFile = ref(null)
+const importCaseSetId = ref(null)
+const caseSets = ref([])
 let buildStageTimer = null
 
 const buildStages = [
@@ -149,6 +232,15 @@ const sourceForm = reactive({
 const searchForm = reactive({
   query_text: '',
   top_k: 5
+})
+
+const topSearchScore = computed(() => formatScore(Math.max(...searchResult.value.map(item => Number(item.score || 0)))))
+const averageSearchScore = computed(() => {
+  if (!searchResult.value.length) {
+    return '0.0000'
+  }
+  const total = searchResult.value.reduce((sum, item) => sum + Number(item.score || 0), 0)
+  return formatScore(total / searchResult.value.length)
 })
 
 async function loadKnowledgeBases() {
@@ -231,6 +323,51 @@ async function handleAddSource() {
   }
 }
 
+function handleFileChange(event) {
+  const file = event.target.files?.[0]
+  selectedFile.value = file || null
+}
+
+async function handleUploadSource() {
+  if (!selectedKnowledgeBase.value || !selectedFile.value) {
+    return
+  }
+  uploadingSource.value = true
+  try {
+    const result = await uploadKnowledgeSourceFile(selectedKnowledgeBase.value.knowledge_base_id, selectedFile.value)
+    showSuccess(`文件解析成功：${result.source_name}，请继续构建索引`)
+    selectedFile.value = null
+    if (fileInputRef.value) {
+      fileInputRef.value.value = ''
+    }
+  } finally {
+    uploadingSource.value = false
+  }
+}
+
+async function loadCaseSets() {
+  try {
+    const result = await listCaseSets({ page: 1, page_size: 100 })
+    caseSets.value = result.items || []
+  } catch {
+    caseSets.value = []
+  }
+}
+
+async function handleImportCaseSet() {
+  if (!selectedKnowledgeBase.value || !importCaseSetId.value) {
+    return
+  }
+  importingSource.value = true
+  try {
+    const result = await importCaseSetAsSource(selectedKnowledgeBase.value.knowledge_base_id, importCaseSetId.value)
+    showSuccess(`用例集已导入为知识来源：${result.source_name}，请继续构建索引`)
+    importCaseSetId.value = null
+  } finally {
+    importingSource.value = false
+  }
+}
+
 async function handleBuildIndex() {
   if (!selectedKnowledgeBase.value) {
     return
@@ -239,7 +376,7 @@ async function handleBuildIndex() {
   buildResult.value = null
   startBuildStageText()
   try {
-    buildResult.value = await buildIndex(selectedKnowledgeBase.value.knowledge_base_id, getCurrentUserId())
+    buildResult.value = await buildIndex(selectedKnowledgeBase.value.knowledge_base_id)
     showSuccess('FAISS索引构建成功')
   } finally {
     stopBuildStageText()
@@ -268,7 +405,30 @@ async function handleSearch() {
   }
 }
 
+function openChunkDetail(row) {
+  activeChunk.value = row
+  chunkDialogVisible.value = true
+}
+
+async function copyChunkText(row) {
+  if (!row?.chunk_text) {
+    showWarning('暂无可复制的片段内容')
+    return
+  }
+  await navigator.clipboard.writeText(row.chunk_text)
+  showSuccess('命中知识片段已复制')
+}
+
+function formatMetadata(metadata) {
+  return metadata ? JSON.stringify(metadata, null, 2) : '无元数据'
+}
+
+function formatScore(value) {
+  return Number(value || 0).toFixed(4)
+}
+
 function startBuildStageText() {
+  stopBuildStageText()
   let index = 0
   buildStageText.value = buildStages[index]
   buildStageTimer = window.setInterval(() => {
@@ -284,7 +444,11 @@ function stopBuildStageText() {
   }
 }
 
-onMounted(loadKnowledgeBases)
+onMounted(() => {
+  loadKnowledgeBases()
+  loadCaseSets()
+})
+onBeforeUnmount(stopBuildStageText)
 </script>
 
 <style scoped>
@@ -310,7 +474,77 @@ onMounted(loadKnowledgeBases)
   margin-top: 14px;
 }
 
+.wide-select {
+  width: 100%;
+}
+
 .result-box {
   margin-top: 16px;
+}
+
+.search-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.search-summary-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px;
+  border: 1px solid #dbeafe;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.search-summary-card span {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.search-summary-card strong {
+  color: #2563eb;
+  font-size: 24px;
+}
+
+.chunk-detail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.chunk-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chunk-title {
+  color: #334155;
+  font-weight: 700;
+}
+
+.chunk-text {
+  max-height: 220px;
+  overflow: auto;
+  padding: 12px;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #475569;
+  line-height: 1.8;
+  white-space: pre-wrap;
+}
+
+.metadata-preview {
+  max-height: 180px;
+  overflow: auto;
+  margin: 0;
+  padding: 12px;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-size: 12px;
 }
 </style>

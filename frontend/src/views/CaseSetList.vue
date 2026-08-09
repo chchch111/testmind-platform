@@ -10,7 +10,19 @@
       <input ref="fileInputRef" class="hidden-file" type="file" accept=".xmind" @change="handleImportFileChange" />
     </div>
 
-    <el-table v-loading="loading" :data="caseSets" border>
+    <div class="filter-bar">
+      <el-input v-model="filters.keyword" clearable placeholder="按名称/描述搜索" class="keyword-input" />
+      <el-select v-model="filters.sourceType" clearable placeholder="全部来源" class="filter-select">
+        <el-option v-for="option in sourceTypeOptions" :key="option.value" :label="option.label" :value="option.value" />
+      </el-select>
+      <el-select v-model="filters.status" clearable placeholder="全部状态" class="filter-select">
+        <el-option v-for="option in statusOptions" :key="option.value" :label="option.label" :value="option.value" />
+      </el-select>
+      <el-button @click="resetFilters">重置筛选</el-button>
+      <span class="filter-count">筛选结果 {{ filteredCaseSets.length }} 条</span>
+    </div>
+
+    <el-table v-loading="loading" :data="pagedCaseSets" border>
       <el-table-column prop="case_set_id" label="ID" width="80" />
       <el-table-column prop="name" label="用例集名称" min-width="220" />
       <el-table-column label="来源" width="120">
@@ -19,7 +31,9 @@
       <el-table-column label="状态" width="100">
         <template #default="{ row }">{{ STATUS_TEXT[row.status] || row.status }}</template>
       </el-table-column>
-      <el-table-column prop="created_at" label="创建时间" width="190" />
+      <el-table-column label="创建时间" width="190">
+        <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
+      </el-table-column>
       <el-table-column label="操作" width="360" fixed="right">
         <template #default="{ row }">
           <el-button size="small" type="primary" @click="$router.push(`/case-sets/${row.case_set_id}`)">查看树</el-button>
@@ -33,10 +47,9 @@
       class="pager"
       background
       layout="prev, pager, next, total"
-      :total="total"
+      :total="filteredCaseSets.length"
       :page-size="pageSize"
       v-model:current-page="page"
-      @current-change="loadCaseSets"
     />
 
     <el-dialog v-model="createDialogVisible" title="新建用例集" width="520px">
@@ -58,10 +71,12 @@
 
 <script setup>
 import { ElMessageBox } from 'element-plus'
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { createCaseSet, deleteCaseSet, listCaseSets } from '../api/case'
+import { getCaseSetMetas } from '../api/canvas'
 import { exportXmind, importXmind } from '../api/xmind'
 import { SOURCE_TYPE_TEXT, STATUS_TEXT } from '../utils/constants'
+import { formatDateTime } from '../utils/format'
 import { confirmAction, showErrorDetail, showSuccess } from '../utils/message'
 import { getCurrentUserId } from '../utils/storage'
 
@@ -70,22 +85,48 @@ const creating = ref(false)
 const importing = ref(false)
 const exportingId = ref(null)
 const caseSets = ref([])
-const total = ref(0)
 const page = ref(1)
 const pageSize = ref(10)
 const createDialogVisible = ref(false)
 const fileInputRef = ref(null)
 const createForm = reactive({ name: '', description: '' })
+const filters = reactive({ keyword: '', sourceType: '', status: '' })
+
+const sourceTypeOptions = Object.entries(SOURCE_TYPE_TEXT).map(([value, label]) => ({ value, label }))
+const statusOptions = ['active', 'disabled', 'archived'].map(value => ({ value, label: STATUS_TEXT[value] || value }))
+const filteredCaseSets = computed(() => {
+  const keyword = filters.keyword.trim().toLowerCase()
+  return caseSets.value.filter(item => {
+    const keywordMatches = !keyword || `${item.name || ''} ${item.description || ''}`.toLowerCase().includes(keyword)
+    const sourceMatches = !filters.sourceType || item.source_type === filters.sourceType
+    const statusMatches = !filters.status || item.status === filters.status
+    return keywordMatches && sourceMatches && statusMatches
+  })
+})
+const pagedCaseSets = computed(() => {
+  const start = (page.value - 1) * pageSize.value
+  return filteredCaseSets.value.slice(start, start + pageSize.value)
+})
+
+watch(filters, () => {
+  page.value = 1
+})
 
 async function loadCaseSets() {
   loading.value = true
   try {
-    const result = await listCaseSets({ page: page.value, page_size: pageSize.value })
+    const result = await listCaseSets({ page: 1, page_size: 100 })
     caseSets.value = result.items || []
-    total.value = result.total || 0
   } finally {
     loading.value = false
   }
+}
+
+function resetFilters() {
+  filters.keyword = ''
+  filters.sourceType = ''
+  filters.status = ''
+  page.value = 1
 }
 
 function openCreateDialog() {
@@ -115,7 +156,7 @@ async function handleCreate() {
 
 async function handleDelete(row) {
   await confirmAction(`确认删除用例集「${row.name}」吗？该操作会逻辑删除其下节点。`)
-  await deleteCaseSet(row.case_set_id, { operator_id: getCurrentUserId() })
+  await deleteCaseSet(row.case_set_id)
   showSuccess('用例集删除成功')
   await loadCaseSets()
 }
@@ -137,7 +178,7 @@ async function handleImportFileChange(event) {
 
   importing.value = true
   try {
-    const result = await importXmind(file, getCurrentUserId())
+    const result = await importXmind(file)
     await ElMessageBox.alert(
       `导入成功！\n用例集ID：${result.case_set_id}\n导入批次ID：${result.import_batch_id}\n节点数量：${result.node_count}`,
       'XMind导入成功',
@@ -163,7 +204,8 @@ async function handleExport(row) {
   const fileName = ensureXmindFileName(value || defaultName)
   exportingId.value = row.case_set_id
   try {
-    const blob = await exportXmind(row.case_set_id, getCurrentUserId(), getSavedNodeTagsMap(row.case_set_id))
+    const nodeTagsMap = await getSavedNodeTagsMap(row.case_set_id)
+    const blob = await exportXmind(row.case_set_id, nodeTagsMap)
     downloadBlob(blob, fileName)
     showSuccess(`XMind导出成功：${fileName}`)
   } finally {
@@ -171,14 +213,16 @@ async function handleExport(row) {
   }
 }
 
-function getSavedNodeTagsMap(caseSetId) {
+async function getSavedNodeTagsMap(caseSetId) {
   try {
-    const savedTagsMap = JSON.parse(window.localStorage.getItem(`rag_mindmap_node_tags_${caseSetId}`) || '{}')
-    return Object.fromEntries(
-      Object.entries(savedTagsMap || {})
-        .map(([nodeId, tags]) => [nodeId, Array.isArray(tags) ? tags.filter(tag => tag?.text) : []])
-        .filter(([, tags]) => tags.length)
-    )
+    const result = await getCaseSetMetas(caseSetId)
+    const tagsMap = {}
+    for (const item of result.items || []) {
+      if (item.meta_type === 'tag' && item.meta_key) {
+        tagsMap[item.node_id] = [...(tagsMap[item.node_id] || []), item.meta_key]
+      }
+    }
+    return tagsMap
   } catch {
     return {}
   }
@@ -204,6 +248,27 @@ onMounted(loadCaseSets)
 </script>
 
 <style scoped>
+.filter-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.keyword-input {
+  width: 260px;
+}
+
+.filter-select {
+  width: 150px;
+}
+
+.filter-count {
+  color: #64748b;
+  font-size: 13px;
+}
+
 .pager {
   margin-top: 16px;
   justify-content: flex-end;

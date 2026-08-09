@@ -1,12 +1,17 @@
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 
+from app.api.auth import router as auth_router
 from app.api.ai import router as ai_router
+from app.api.canvas import router as canvas_router
 from app.api.case import router as case_router
 from app.api.health import router as health_router
+from app.api.permission import router as permission_router
 from app.api.rag import router as rag_router
 from app.api.task import router as task_router
 from app.api.xmind import router as xmind_router
+from app.core.auth import get_current_active_user
 from app.core.config import settings
+from app.core.handlers import register_exception_handlers
 
 
 # 创建 FastAPI 应用对象。
@@ -17,15 +22,21 @@ app = FastAPI(
     version="0.1.0",
 )
 
+# 注册统一异常处理，避免把底层异常细节直接回显给前端。
+register_exception_handlers(app)
+
 
 # 注册健康检查接口。
 # 现在先放 /health 和 /health/db，方便确认项目是否启动成功、数据库是否连接成功。
 app.include_router(health_router, prefix="/health", tags=["健康检查"])
-app.include_router(case_router)
-app.include_router(xmind_router)
-app.include_router(task_router)
-app.include_router(rag_router)
-app.include_router(ai_router)
+app.include_router(auth_router)
+app.include_router(permission_router)
+app.include_router(case_router, dependencies=[Depends(get_current_active_user)])
+app.include_router(canvas_router, dependencies=[Depends(get_current_active_user)])
+app.include_router(xmind_router, dependencies=[Depends(get_current_active_user)])
+app.include_router(task_router, dependencies=[Depends(get_current_active_user)])
+app.include_router(rag_router, dependencies=[Depends(get_current_active_user)])
+app.include_router(ai_router, dependencies=[Depends(get_current_active_user)])
 
 
 @app.get("/")

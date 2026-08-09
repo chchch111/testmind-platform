@@ -39,6 +39,7 @@ class CaseNodeCreate(BaseModel):
 
 class CaseNodeUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=300)
+    parent_id: int | None = None
     node_type: str | None = None
     precondition: str | None = None
     test_steps: str | None = None
@@ -80,7 +81,7 @@ class CaseSetPageOut(BaseModel):
 
 
 class DeleteRequest(BaseModel):
-    operator_id: int = 1
+    pass
 
 
 class CaseNodeVersionOut(BaseModel):
@@ -104,5 +105,4 @@ class CaseNodeVersionOut(BaseModel):
 
 
 class RollbackRequest(BaseModel):
-    operator_id: int = 1
     change_note: str | None = "回退历史版本"

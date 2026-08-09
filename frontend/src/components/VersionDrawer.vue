@@ -6,7 +6,9 @@
         <el-table-column prop="version_no" label="版本号" width="90" />
         <el-table-column prop="operation_type" label="操作类型" width="110" />
         <el-table-column prop="change_note" label="变更说明" min-width="180" />
-        <el-table-column prop="created_at" label="创建时间" width="180" />
+        <el-table-column label="创建时间" width="180">
+          <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
+        </el-table-column>
         <el-table-column label="操作" width="120">
           <template #default="{ row }">
             <el-button size="small" type="primary" @click="selectedVersion = row">对比</el-button>
@@ -29,8 +31,8 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { listNodeVersions, rollbackNode } from '../api/case'
+import { formatDateTime } from '../utils/format'
 import { confirmAction, showSuccess } from '../utils/message'
-import { getCurrentUserId } from '../utils/storage'
 import VersionDiff from './VersionDiff.vue'
 
 const props = defineProps({
@@ -77,7 +79,6 @@ async function handleRollback() {
   rollingBack.value = true
   try {
     await rollbackNode(props.currentNode.node_id, selectedVersion.value.version_id, {
-      operator_id: getCurrentUserId(),
       change_note: `前端回退到版本 v${selectedVersion.value.version_no}`
     })
     showSuccess('版本回退成功')

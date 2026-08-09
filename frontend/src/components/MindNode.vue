@@ -1,6 +1,19 @@
 <template>
   <div class="mind-node-wrap">
-    <div class="mind-node" :class="nodeClass" :data-node-id="node.node_id" @click.stop="handleSelect" @dblclick.stop="handleEdit" @contextmenu.prevent.stop="handleContextMenu">
+    <div
+      class="mind-node"
+      :class="nodeClass"
+      :data-node-id="node.node_id"
+      :draggable="!isEditing"
+      @click.stop="handleSelect"
+      @dblclick.stop="handleEdit"
+      @contextmenu.prevent.stop="handleContextMenu"
+      @dragstart.stop="handleDragStart"
+      @dragover.prevent.stop="handleDragOver"
+      @dragleave.stop="handleDragLeave"
+      @drop.prevent.stop="handleDrop"
+      @dragend.stop="handleDragEnd"
+    >
       <div class="node-main-line">
         <input
           v-if="isEditing"
@@ -58,6 +71,9 @@
             @image-click="$emit('image-click', $event)"
             @review-click="$emit('review-click', $event)"
             @toggle-collapse="$emit('toggle-collapse', $event)"
+            @node-drag-start="$emit('node-drag-start', $event)"
+            @node-drop="$emit('node-drop', $event)"
+            @node-drag-end="$emit('node-drag-end')"
           />
         </div>
       </div>
@@ -119,9 +135,10 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['select', 'node-contextmenu', 'title-save', 'edit-cancel', 'edit-request', 'note-click', 'link-click', 'image-click', 'review-click', 'toggle-collapse'])
+const emit = defineEmits(['select', 'node-contextmenu', 'title-save', 'edit-cancel', 'edit-request', 'note-click', 'link-click', 'image-click', 'review-click', 'toggle-collapse', 'node-drag-start', 'node-drop', 'node-drag-end'])
 const titleInputRef = ref(null)
 const draftTitle = ref(props.node.title || '')
+const dragOver = ref(false)
 
 const children = computed(() => props.node.children || [])
 const isCollapsed = computed(() => props.collapsedNodeIds.includes(props.node.node_id))
@@ -139,6 +156,7 @@ const nodeClass = computed(() => ({
   'case-node': props.node.node_type === 'case',
   'folder-node': props.node.node_type !== 'case',
   'is-collapsed': isCollapsed.value,
+  'is-drag-over': dragOver.value,
   [`size-${props.appearance.nodeSize || 'normal'}`]: true,
   'is-selected': props.node.node_id === props.selectedNodeId || props.selectedNodeIds.includes(props.node.node_id),
   'is-editing': isEditing.value
@@ -199,6 +217,32 @@ function handleToggleCollapse() {
   emit('toggle-collapse', props.node)
 }
 
+function handleDragStart(event) {
+  event.dataTransfer.effectAllowed = 'move'
+  event.dataTransfer.setData('text/plain', String(props.node.node_id))
+  emit('select', props.node)
+  emit('node-drag-start', props.node)
+}
+
+function handleDragOver(event) {
+  event.dataTransfer.dropEffect = 'move'
+  dragOver.value = true
+}
+
+function handleDragLeave() {
+  dragOver.value = false
+}
+
+function handleDrop() {
+  dragOver.value = false
+  emit('node-drop', props.node)
+}
+
+function handleDragEnd() {
+  dragOver.value = false
+  emit('node-drag-end')
+}
+
 function commitTitle() {
   const title = draftTitle.value.trim()
   if (!title) {
@@ -236,7 +280,7 @@ function cancelEdit() {
   border-radius: 6px;
   background: #ffffff;
   box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
-  cursor: text;
+  cursor: grab;
   transition: 0.18s ease;
 }
 
@@ -245,6 +289,15 @@ function cancelEdit() {
   border-color: #2563eb;
   box-shadow: 0 6px 18px rgba(37, 99, 235, 0.22);
   transform: translateY(-1px);
+}
+
+.mind-node.is-drag-over {
+  border-color: #f97316;
+  box-shadow: 0 0 0 4px rgba(249, 115, 22, 0.18), 0 8px 22px rgba(249, 115, 22, 0.26);
+}
+
+.mind-node.is-editing {
+  cursor: text;
 }
 
 .mind-node.is-selected::after {

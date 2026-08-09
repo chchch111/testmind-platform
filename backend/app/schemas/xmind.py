@@ -17,7 +17,6 @@ class XMindNodeTagIn(BaseModel):
 
 
 class XMindExportIn(BaseModel):
-    operator_id: int = 1
     node_tags_map: dict[str, list[XMindNodeTagIn]] = {}
 
 

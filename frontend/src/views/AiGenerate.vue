@@ -128,14 +128,54 @@
             <span v-else>未入库</span>
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="190" />
-        <el-table-column label="操作" width="120" fixed="right">
+        <el-table-column label="创建时间" width="190">
+          <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="170" fixed="right">
           <template #default="{ row }">
             <el-button size="small" @click="previewRecord(row)">预览</el-button>
+            <el-button size="small" type="primary" @click="openRecordDetail(row)">详情</el-button>
           </template>
         </el-table-column>
       </el-table>
     </div>
+
+    <el-dialog v-model="recordDetailVisible" title="AI生成记录详情" width="820px">
+      <div v-if="activeRecord" class="record-detail-body">
+        <el-descriptions :column="2" border>
+          <el-descriptions-item label="生成ID">{{ activeRecord.generation_id }}</el-descriptions-item>
+          <el-descriptions-item label="检索ID">{{ activeRecord.retrieval_id || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="用户ID">{{ activeRecord.user_id }}</el-descriptions-item>
+          <el-descriptions-item label="生成状态">
+            <el-tag :type="activeRecord.generation_status === 'success' ? 'success' : 'danger'">{{ activeRecord.generation_status }}</el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="模型">{{ activeRecord.model_provider }} / {{ activeRecord.model_name }}</el-descriptions-item>
+          <el-descriptions-item label="用例集">{{ activeRecord.case_set_id ? `#${activeRecord.case_set_id}` : '未入库' }}</el-descriptions-item>
+          <el-descriptions-item label="创建时间" :span="2">{{ formatDateTime(activeRecord.created_at) }}</el-descriptions-item>
+        </el-descriptions>
+        <div class="detail-section">
+          <div class="detail-title">原始需求</div>
+          <div class="detail-text">{{ activeRecord.requirement_text }}</div>
+        </div>
+        <div class="detail-section">
+          <div class="detail-title">使用知识片段ID</div>
+          <el-tag v-for="chunkId in activeRecord.used_chunk_ids || []" :key="chunkId" type="info">{{ chunkId }}</el-tag>
+          <span v-if="!activeRecord.used_chunk_ids?.length" class="empty-text">无</span>
+        </div>
+        <div v-if="activeRecord.error_message" class="detail-section">
+          <div class="detail-title danger-text">错误信息</div>
+          <div class="detail-text danger-text">{{ activeRecord.error_message }}</div>
+        </div>
+        <div class="detail-section">
+          <div class="detail-title">生成JSON</div>
+          <pre class="json-preview">{{ formatRecordJson(activeRecord.generated_json) }}</pre>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="recordDetailVisible = false">关闭</el-button>
+        <el-button :disabled="!activeRecord?.case_set_id" type="primary" @click="router.push(`/case-sets/${activeRecord.case_set_id}`)">打开脑图</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -145,6 +185,7 @@ import { useRouter } from 'vue-router'
 import AiResultPreview from '../components/AiResultPreview.vue'
 import { generateCaseSet, listGenerationRecords } from '../api/ai'
 import { listKnowledgeBases } from '../api/rag'
+import { formatDateTime } from '../utils/format'
 import { showSuccess, showWarning } from '../utils/message'
 import { getCurrentUserId } from '../utils/storage'
 
@@ -154,6 +195,8 @@ const records = ref([])
 const result = ref(null)
 const generating = ref(false)
 const recordLoading = ref(false)
+const recordDetailVisible = ref(false)
+const activeRecord = ref(null)
 const activeStage = ref(0)
 const currentStageText = ref('等待开始生成')
 let stageTimer = null
@@ -274,6 +317,18 @@ async function copyGeneratedText() {
   showSuccess('已复制AI生成JSON')
 }
 
+function openRecordDetail(row) {
+  activeRecord.value = row
+  recordDetailVisible.value = true
+}
+
+function formatRecordJson(value) {
+  if (!value) {
+    return '无可预览JSON'
+  }
+  return JSON.stringify(value, null, 2)
+}
+
 function previewRecord(row) {
   result.value = {
     generation_id: row.generation_id,
@@ -378,5 +433,53 @@ onBeforeUnmount(stopStageProgress)
 
 .preview-card {
   min-height: 500px;
+}
+
+.record-detail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.detail-section {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.detail-title {
+  width: 100%;
+  color: #334155;
+  font-weight: 700;
+}
+
+.detail-text {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #475569;
+  line-height: 1.7;
+}
+
+.json-preview {
+  width: 100%;
+  max-height: 280px;
+  overflow: auto;
+  margin: 0;
+  padding: 12px;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.empty-text {
+  color: #94a3b8;
+}
+
+.danger-text {
+  color: #dc2626;
 }
 </style>

@@ -1,4 +1,13 @@
+export const AUTH_TOKEN_KEY = 'rag_mindmap_auth_token'
+export const CURRENT_USER_KEY = 'rag_mindmap_current_user'
 export const CURRENT_USER_ID_KEY = 'rag_mindmap_current_user_id'
+
+export const ROLE_TEXT = {
+  admin: '管理员',
+  manager: '管理人员',
+  tester: '测试人员',
+  executor: '执行人员'
+}
 
 export const SOURCE_TYPE_TEXT = {
   manual: '手动创建',

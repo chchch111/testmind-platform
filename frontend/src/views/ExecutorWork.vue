@@ -9,6 +9,11 @@
         <div class="executor-tools">
           <span>执行人ID</span>
           <el-input-number v-model="executorId" :min="1" />
+          <el-select v-model="executionFilter" clearable placeholder="全部执行状态" class="status-filter">
+            <el-option v-for="option in executionStatusOptions" :key="option.value" :label="option.label" :value="option.value" />
+          </el-select>
+          <el-button @click="executionFilter = 'failed'">只看失败</el-button>
+          <el-button @click="executionFilter = 'blocked'">只看阻塞</el-button>
           <el-button type="primary" :loading="loading" @click="loadExecutorTasks">批量同步任务</el-button>
         </div>
       </div>
@@ -24,7 +29,15 @@
           <el-tag type="success">{{ STATUS_TEXT[item.task.status] || item.task.status }}</el-tag>
         </div>
 
-        <el-table :data="item.executions" border @selection-change="rows => handleSelectionChange(item.task.task_id, rows)">
+        <div class="execution-summary">
+          <el-tag>全部 {{ item.executions.length }}</el-tag>
+          <el-tag type="info">未执行 {{ countExecutionStatus(item.executions, 'not_run') }}</el-tag>
+          <el-tag type="success">通过 {{ countExecutionStatus(item.executions, 'passed') }}</el-tag>
+          <el-tag type="danger">失败 {{ countExecutionStatus(item.executions, 'failed') }}</el-tag>
+          <el-tag type="warning">阻塞 {{ countExecutionStatus(item.executions, 'blocked') }}</el-tag>
+        </div>
+
+        <el-table :data="filteredExecutions(item.executions)" border @selection-change="rows => handleSelectionChange(item.task.task_id, rows)">
           <el-table-column type="selection" width="48" />
           <el-table-column prop="execution_id" label="执行ID" width="90" />
           <el-table-column prop="case_node_id" label="用例节点ID" width="110" />
@@ -75,12 +88,20 @@ import { showSuccess, showWarning } from '../utils/message'
 import { getCurrentUserId } from '../utils/storage'
 
 const executorId = ref(getCurrentUserId())
+const executionFilter = ref('')
 const loading = ref(false)
 const tasks = ref([])
 const selectedRowsMap = reactive({})
 const activeExecution = ref(null)
 const radialVisible = ref(false)
 const radialPosition = reactive({ x: 600, y: 360 })
+const executionStatusOptions = [
+  { label: '未执行', value: 'not_run' },
+  { label: '通过', value: 'passed' },
+  { label: '失败', value: 'failed' },
+  { label: '阻塞', value: 'blocked' },
+  { label: '不适用', value: 'skipped' }
+]
 
 async function loadExecutorTasks() {
   loading.value = true
@@ -94,6 +115,17 @@ async function loadExecutorTasks() {
 
 function handleSelectionChange(taskId, rows) {
   selectedRowsMap[taskId] = rows
+}
+
+function filteredExecutions(executions) {
+  if (!executionFilter.value) {
+    return executions
+  }
+  return executions.filter(row => row.execution_status === executionFilter.value)
+}
+
+function countExecutionStatus(executions, status) {
+  return executions.filter(row => row.execution_status === status).length
 }
 
 function openRadialMenu(event, row) {
@@ -117,7 +149,7 @@ async function handleRadialAction(action) {
   } else if (action === 'note') {
     await updateSingleExecution(activeExecution.value, activeExecution.value.execution_status, '通过圆形菜单添加备注', activeExecution.value.bug_description)
   } else if (action === 'skipped') {
-    await updateSingleExecution(activeExecution.value, 'blocked', '该用例当前不适用，暂按阻塞处理', '不适用')
+    await updateSingleExecution(activeExecution.value, 'skipped', '该用例当前不适用，暂按不适用处理', '不适用')
   } else {
     await updateSingleExecution(activeExecution.value, action, defaultActualResult(action), action === 'failed' ? '通过圆形菜单标记失败' : null)
   }
@@ -165,6 +197,7 @@ function defaultActualResult(status) {
   if (status === 'passed') return '执行通过，实际结果符合预期。'
   if (status === 'failed') return '执行失败，实际结果不符合预期。'
   if (status === 'blocked') return '执行阻塞，当前环境或条件不满足。'
+  if (status === 'skipped') return '用例不适用，跳过执行。'
   return '已更新执行记录。'
 }
 
@@ -172,6 +205,7 @@ function statusTagType(status) {
   if (status === 'passed') return 'success'
   if (status === 'failed') return 'danger'
   if (status === 'blocked') return 'warning'
+  if (status === 'skipped') return 'info'
   return 'info'
 }
 
@@ -195,7 +229,12 @@ onMounted(loadExecutorTasks)
 .executor-tools {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
+}
+
+.status-filter {
+  width: 150px;
 }
 
 .task-list {
@@ -211,6 +250,13 @@ onMounted(loadExecutorTasks)
 .task-card p {
   margin: 0 0 14px;
   color: #64748b;
+}
+
+.execution-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 12px;
 }
 
 .batch-actions {
