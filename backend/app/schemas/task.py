@@ -49,6 +49,8 @@ class ExecutionOut(BaseModel):
     execution_id: int
     task_id: int
     case_node_id: int
+    case_node_title: str | None = None
+    case_node_priority: str | None = None
     executor_id: int
     execution_status: str
     actual_result: str | None

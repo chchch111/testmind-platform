@@ -32,11 +32,13 @@ def api_create_task(
 
 @router.get("/tasks", response_model=TaskPageOut)
 def api_list_tasks(
+    keyword: str | None = Query(default=None),
+    status: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=10, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
-    return list_tasks(db, page, page_size)
+    return list_tasks(db, page, page_size, keyword, status)
 
 
 @router.get("/tasks/{task_id}", response_model=TaskDetailOut)

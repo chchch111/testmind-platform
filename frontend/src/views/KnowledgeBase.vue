@@ -75,7 +75,11 @@
         <div class="page-card">
           <h2>构建FAISS索引</h2>
           <p class="section-desc">系统将使用 LangChain 切片、bge-small-zh 向量化，并把 FAISS 文件保存到服务端磁盘。</p>
-          <el-alert v-if="building" :title="buildStageText" type="info" show-icon :closable="false" />
+          <el-alert v-if="building" :title="buildStageText" type="info" show-icon :closable="false">
+            <template #default>
+              <div class="stage-hint">阶段文案为流程示意，实际构建以服务端返回为准，知识库较大时耗时较长。</div>
+            </template>
+          </el-alert>
           <el-button class="build-button" type="success" :loading="building" @click="handleBuildIndex">构建索引</el-button>
           <el-descriptions v-if="buildResult" class="result-box" border :column="1">
             <el-descriptions-item label="FAISS索引ID">{{ buildResult.faiss_index_id }}</el-descriptions-item>
@@ -476,6 +480,12 @@ onBeforeUnmount(stopBuildStageText)
 
 .wide-select {
   width: 100%;
+}
+
+.stage-hint {
+  margin-top: 6px;
+  color: #94a3b8;
+  font-size: 12px;
 }
 
 .result-box {

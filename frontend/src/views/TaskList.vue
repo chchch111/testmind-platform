@@ -16,32 +16,32 @@
     <div class="summary-grid">
       <div class="summary-card page-card">
         <span>任务总数</span>
-        <strong>{{ filters.keyword || filters.status ? filteredTasks.length : taskTotal }}</strong>
+        <strong>{{ total }}</strong>
       </div>
       <div class="summary-card page-card">
-        <span>执行中</span>
+        <span>本页执行中</span>
         <strong>{{ countByStatus('running') }}</strong>
       </div>
       <div class="summary-card page-card">
-        <span>已分配</span>
+        <span>本页已分配</span>
         <strong>{{ countByStatus('assigned') }}</strong>
       </div>
       <div class="summary-card page-card">
-        <span>已完成</span>
+        <span>本页已完成</span>
         <strong>{{ countByStatus('finished') }}</strong>
       </div>
     </div>
 
     <div class="page-card">
       <div class="filter-bar">
-        <el-input v-model="filters.keyword" clearable placeholder="按任务名称/描述搜索" class="keyword-input" />
-        <el-select v-model="filters.status" clearable placeholder="全部状态" class="filter-select">
+        <el-input v-model="filters.keyword" clearable placeholder="按任务名称/描述搜索" class="keyword-input" @keyup.enter="search" @clear="search" />
+        <el-select v-model="filters.status" clearable placeholder="全部状态" class="filter-select" @change="search">
           <el-option v-for="option in taskStatusOptions" :key="option.value" :label="option.label" :value="option.value" />
         </el-select>
         <el-button @click="resetFilters">重置筛选</el-button>
-        <span class="filter-count">筛选结果 {{ filteredTasks.length }} 条</span>
+        <span class="filter-count">共 {{ total }} 条</span>
       </div>
-      <el-table v-loading="loading" :data="filteredTasks" border>
+      <el-table v-loading="loading" :data="tasks" border>
         <el-table-column prop="task_id" label="ID" width="80" />
         <el-table-column prop="task_name" label="任务名称" min-width="220" />
         <el-table-column prop="description" label="任务描述" min-width="260" show-overflow-tooltip />
@@ -68,6 +68,14 @@
           </template>
         </el-table-column>
       </el-table>
+      <el-pagination
+        class="pager"
+        background
+        layout="prev, pager, next, total"
+        :total="total"
+        :page-size="pageSize"
+        v-model:current-page="page"
+      />
     </div>
 
     <el-dialog v-model="createDialogVisible" title="创建测试任务" width="720px">
@@ -119,7 +127,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { onMounted, reactive, ref, watch } from 'vue'
 import { listCaseSets } from '../api/case'
 import { cancelTask, createTask, deleteTask, listTasks } from '../api/task'
 import { STATUS_TEXT } from '../utils/constants'
@@ -131,7 +139,9 @@ const loading = ref(false)
 const creating = ref(false)
 const createDialogVisible = ref(false)
 const tasks = ref([])
-const taskTotal = ref(0)
+const total = ref(0)
+const page = ref(1)
+const pageSize = ref(10)
 const caseSets = ref([])
 const assigneeInputValues = ref([String(getCurrentUserId())])
 const dateRange = ref([])
@@ -143,25 +153,31 @@ const createForm = reactive({
 })
 
 const taskStatusOptions = ['assigned', 'running', 'finished', 'cancelled'].map(value => ({ value, label: STATUS_TEXT[value] || value }))
-const filteredTasks = computed(() => {
-  const keyword = filters.keyword.trim().toLowerCase()
-  return tasks.value.filter(task => {
-    const keywordMatches = !keyword || `${task.task_name || ''} ${task.description || ''}`.toLowerCase().includes(keyword)
-    const statusMatches = !filters.status || task.status === filters.status
-    return keywordMatches && statusMatches
-  })
-})
 
 async function loadTasks() {
   loading.value = true
   try {
-    const result = await listTasks({ page: 1, page_size: 100 })
+    const result = await listTasks({
+      page: page.value,
+      page_size: pageSize.value,
+      keyword: filters.keyword.trim() || undefined,
+      status: filters.status || undefined
+    })
     tasks.value = Array.isArray(result) ? result : result.items || []
-    taskTotal.value = Array.isArray(result) ? result.length : result.total || 0
+    total.value = Array.isArray(result) ? result.length : result.total || 0
   } finally {
     loading.value = false
   }
 }
+
+function search() {
+  page.value = 1
+  loadTasks()
+}
+
+watch(page, () => {
+  loadTasks()
+})
 
 async function loadCaseSets() {
   const result = await listCaseSets({ page: 1, page_size: 100 })
@@ -241,10 +257,11 @@ async function handleDeleteTask(row) {
 function resetFilters() {
   filters.keyword = ''
   filters.status = ''
+  search()
 }
 
 function countByStatus(status) {
-  return filteredTasks.value.filter(task => task.status === status).length
+  return tasks.value.filter(task => task.status === status).length
 }
 
 function taskStatusTagType(status) {
@@ -265,6 +282,11 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.pager {
+  margin-top: 16px;
+  justify-content: flex-end;
 }
 
 .page-header-row {

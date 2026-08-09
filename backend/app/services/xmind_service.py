@@ -96,7 +96,7 @@ def import_xmind_file(db: Session, file: UploadFile, created_by: int) -> dict:
         xmind_file.process_status = "failed"
         xmind_file.error_message = str(error)
         db.commit()
-        raise HTTPException(status_code=400, detail=f"XMind导入失败：{error}") from error
+        raise HTTPException(status_code=400, detail=safe_xmind_error_message(error)) from error
 
 
 def read_xmind_root_topic(file_path: Path) -> dict:
@@ -290,3 +290,19 @@ def build_tagged_title(title: str, tags: list[str]) -> str:
         return title
     tag_prefix = "".join(f"【{tag}】" for tag in clean_tags)
     return f"{tag_prefix}{title}"
+
+
+def safe_xmind_error_message(error: Exception) -> str:
+    """把 XMind 导入的底层异常转成友好提示，避免回显服务器路径等敏感信息。"""
+    if isinstance(error, HTTPException):
+        return str(error.detail)
+    text = str(error)
+    if "content.json" in text and "仅支持" in text:
+        return text
+    if "不是有效的XMind压缩包" in text:
+        return text
+    if "层级过深" in text:
+        return text
+    if "content.json结构为空" in text or "缺少rootTopic" in text:
+        return text
+    return "XMind导入失败，请检查文件是否为新版 .xmind 格式（包含 content.json）"

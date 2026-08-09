@@ -1,5 +1,5 @@
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.case import TestCaseNode, TestCaseNodeVersion, TestCaseSet
@@ -32,11 +32,27 @@ def create_case_set(db: Session, data: CaseSetCreate) -> TestCaseSet:
     return case_set
 
 
-def list_case_sets(db: Session, page: int, page_size: int) -> dict:
-    total = db.scalar(select(func.count()).select_from(TestCaseSet).where(TestCaseSet.is_deleted == 0)) or 0
+def list_case_sets(
+    db: Session,
+    page: int,
+    page_size: int,
+    keyword: str | None = None,
+    source_type: str | None = None,
+    status: str | None = None,
+) -> dict:
+    conditions = [TestCaseSet.is_deleted == 0]
+    if keyword and keyword.strip():
+        like_keyword = f"%{keyword.strip()}%"
+        conditions.append(or_(TestCaseSet.name.like(like_keyword), TestCaseSet.description.like(like_keyword)))
+    if source_type:
+        conditions.append(TestCaseSet.source_type == source_type)
+    if status:
+        conditions.append(TestCaseSet.status == status)
+
+    total = db.scalar(select(func.count()).select_from(TestCaseSet).where(*conditions)) or 0
     statement = (
         select(TestCaseSet)
-        .where(TestCaseSet.is_deleted == 0)
+        .where(*conditions)
         .order_by(TestCaseSet.case_set_id.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)

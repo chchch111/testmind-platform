@@ -19,10 +19,10 @@
         <el-option v-for="option in statusOptions" :key="option.value" :label="option.label" :value="option.value" />
       </el-select>
       <el-button @click="resetFilters">重置筛选</el-button>
-      <span class="filter-count">筛选结果 {{ filteredCaseSets.length }} 条</span>
+      <span class="filter-count">共 {{ total }} 条</span>
     </div>
 
-    <el-table v-loading="loading" :data="pagedCaseSets" border>
+    <el-table v-loading="loading" :data="caseSets" border>
       <el-table-column prop="case_set_id" label="ID" width="80" />
       <el-table-column prop="name" label="用例集名称" min-width="220" />
       <el-table-column label="来源" width="120">
@@ -47,7 +47,7 @@
       class="pager"
       background
       layout="prev, pager, next, total"
-      :total="filteredCaseSets.length"
+      :total="total"
       :page-size="pageSize"
       v-model:current-page="page"
     />
@@ -71,7 +71,7 @@
 
 <script setup>
 import { ElMessageBox } from 'element-plus'
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { onMounted, reactive, ref, watch } from 'vue'
 import { createCaseSet, deleteCaseSet, listCaseSets } from '../api/case'
 import { getCaseSetMetas } from '../api/canvas'
 import { exportXmind, importXmind } from '../api/xmind'
@@ -85,6 +85,7 @@ const creating = ref(false)
 const importing = ref(false)
 const exportingId = ref(null)
 const caseSets = ref([])
+const total = ref(0)
 const page = ref(1)
 const pageSize = ref(10)
 const createDialogVisible = ref(false)
@@ -94,29 +95,23 @@ const filters = reactive({ keyword: '', sourceType: '', status: '' })
 
 const sourceTypeOptions = Object.entries(SOURCE_TYPE_TEXT).map(([value, label]) => ({ value, label }))
 const statusOptions = ['active', 'disabled', 'archived'].map(value => ({ value, label: STATUS_TEXT[value] || value }))
-const filteredCaseSets = computed(() => {
-  const keyword = filters.keyword.trim().toLowerCase()
-  return caseSets.value.filter(item => {
-    const keywordMatches = !keyword || `${item.name || ''} ${item.description || ''}`.toLowerCase().includes(keyword)
-    const sourceMatches = !filters.sourceType || item.source_type === filters.sourceType
-    const statusMatches = !filters.status || item.status === filters.status
-    return keywordMatches && sourceMatches && statusMatches
-  })
-})
-const pagedCaseSets = computed(() => {
-  const start = (page.value - 1) * pageSize.value
-  return filteredCaseSets.value.slice(start, start + pageSize.value)
-})
 
-watch(filters, () => {
-  page.value = 1
+watch([filters, page], () => {
+  loadCaseSets()
 })
 
 async function loadCaseSets() {
   loading.value = true
   try {
-    const result = await listCaseSets({ page: 1, page_size: 100 })
+    const result = await listCaseSets({
+      page: page.value,
+      page_size: pageSize.value,
+      keyword: filters.keyword.trim() || undefined,
+      source_type: filters.sourceType || undefined,
+      status: filters.status || undefined
+    })
     caseSets.value = result.items || []
+    total.value = result.total || 0
   } finally {
     loading.value = false
   }

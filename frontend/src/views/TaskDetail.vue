@@ -92,7 +92,12 @@
 
           <el-table :data="filteredExecutions" border>
             <el-table-column prop="execution_id" label="执行ID" width="90" />
-            <el-table-column prop="case_node_id" label="用例节点ID" width="120" />
+            <el-table-column label="用例节点" min-width="180" show-overflow-tooltip>
+              <template #default="{ row }">
+                <span v-if="row.case_node_title">{{ row.case_node_title }}</span>
+                <span v-else>#{{ row.case_node_id }}</span>
+              </template>
+            </el-table-column>
             <el-table-column prop="executor_id" label="执行人ID" width="110" />
             <el-table-column label="执行状态" width="120">
               <template #default="{ row }">
@@ -285,13 +290,15 @@ function exportExecutionCsv() {
     return
   }
   const rows = [
-    ['任务ID', '任务名称', '任务状态', '执行ID', '用例节点ID', '执行人ID', '执行状态', '实际结果', '缺陷描述', '同步状态', '同步版本', '执行时间', '创建时间'],
+    ['任务ID', '任务名称', '任务状态', '执行ID', '用例节点', '用例节点ID', '优先级', '执行人ID', '执行状态', '实际结果', '缺陷描述', '同步状态', '同步版本', '执行时间', '创建时间'],
     ...filteredExecutions.value.map(row => [
       task.value.task_id,
       task.value.task_name,
       STATUS_TEXT[task.value.status] || task.value.status,
       row.execution_id,
+      row.case_node_title || `#${row.case_node_id}`,
       row.case_node_id,
+      row.case_node_priority || '',
       row.executor_id,
       EXECUTION_STATUS_TEXT[row.execution_status] || row.execution_status,
       row.actual_result || '',

@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.case import TestCaseNode, TestCaseSet
@@ -74,8 +74,20 @@ def create_task(db: Session, data: TaskCreate) -> dict:
     return get_task_detail(db, task.task_id)
 
 
-def list_tasks(db: Session, page: int, page_size: int) -> dict:
+def list_tasks(
+    db: Session,
+    page: int,
+    page_size: int,
+    keyword: str | None = None,
+    status: str | None = None,
+) -> dict:
     conditions = [TestTask.is_deleted == 0]
+    if keyword and keyword.strip():
+        like_keyword = f"%{keyword.strip()}%"
+        conditions.append(or_(TestTask.task_name.like(like_keyword), TestTask.description.like(like_keyword)))
+    if status:
+        conditions.append(TestTask.status == status)
+
     total = db.scalar(select(func.count()).select_from(TestTask).where(*conditions)) or 0
     statement = (
         select(TestTask)
@@ -133,7 +145,7 @@ def get_task_detail(db: Session, task_id: int) -> dict:
     }
 
 
-def list_task_executions(db: Session, task_id: int) -> list[TestExecutionRecord]:
+def list_task_executions(db: Session, task_id: int) -> list[dict]:
     task = db.get(TestTask, task_id)
     if not task or task.is_deleted == 1:
         raise HTTPException(status_code=404, detail="测试任务不存在")
@@ -143,7 +155,8 @@ def list_task_executions(db: Session, task_id: int) -> list[TestExecutionRecord]
         .where(TestExecutionRecord.task_id == task_id)
         .order_by(TestExecutionRecord.executor_id.asc(), TestExecutionRecord.execution_id.asc())
     )
-    return list(db.scalars(statement).all())
+    executions = list(db.scalars(statement).all())
+    return enrich_executions(db, executions)
 
 
 def get_executor_tasks(db: Session, executor_id: int) -> list[dict]:
@@ -167,7 +180,7 @@ def get_executor_tasks(db: Session, executor_id: int) -> list[dict]:
                 .order_by(TestExecutionRecord.execution_id.asc())
             ).all()
         )
-        result.append({"task": task, "executions": executions})
+        result.append({"task": task, "executions": enrich_executions(db, executions)})
     return result
 
 
@@ -248,3 +261,37 @@ def count_execution_status(db: Session, task_id: int, status: str) -> int:
             TestExecutionRecord.execution_status == status,
         )
     ) or 0
+
+
+def enrich_executions(db: Session, executions: list[TestExecutionRecord]) -> list[dict]:
+    """给执行记录附带用例节点标题与优先级，提升前端可读性。"""
+    if not executions:
+        return []
+
+    node_ids = list({execution.case_node_id for execution in executions if execution.case_node_id})
+    nodes = list(
+        db.scalars(select(TestCaseNode).where(TestCaseNode.node_id.in_(node_ids), TestCaseNode.is_deleted == 0)).all()
+    )
+    node_map = {node.node_id: node for node in nodes}
+
+    result = []
+    for execution in executions:
+        item = {
+            "execution_id": execution.execution_id,
+            "task_id": execution.task_id,
+            "case_node_id": execution.case_node_id,
+            "case_node_title": node_map.get(execution.case_node_id) and node_map[execution.case_node_id].title,
+            "case_node_priority": node_map.get(execution.case_node_id) and node_map[execution.case_node_id].priority,
+            "executor_id": execution.executor_id,
+            "execution_status": execution.execution_status,
+            "actual_result": execution.actual_result,
+            "bug_description": execution.bug_description,
+            "sync_status": execution.sync_status,
+            "sync_version": execution.sync_version,
+            "executed_at": execution.executed_at,
+            "synced_at": execution.synced_at,
+            "created_at": execution.created_at,
+            "updated_at": execution.updated_at,
+        }
+        result.append(item)
+    return result

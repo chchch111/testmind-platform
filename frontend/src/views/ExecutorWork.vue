@@ -40,7 +40,12 @@
         <el-table :data="filteredExecutions(item.executions)" border @selection-change="rows => handleSelectionChange(item.task.task_id, rows)">
           <el-table-column type="selection" width="48" />
           <el-table-column prop="execution_id" label="执行ID" width="90" />
-          <el-table-column prop="case_node_id" label="用例节点ID" width="110" />
+          <el-table-column label="用例节点" min-width="170" show-overflow-tooltip>
+            <template #default="{ row }">
+              <span v-if="row.case_node_title">{{ row.case_node_title }}</span>
+              <span v-else>#{{ row.case_node_id }}</span>
+            </template>
+          </el-table-column>
           <el-table-column label="执行状态" width="120">
             <template #default="{ row }">
               <el-tag :type="statusTagType(row.execution_status)">{{ EXECUTION_STATUS_TEXT[row.execution_status] || row.execution_status }}</el-tag>

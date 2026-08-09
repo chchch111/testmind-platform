@@ -81,7 +81,11 @@
             <el-step v-for="stage in stages" :key="stage.title" :title="stage.title" :description="stage.desc" />
           </el-steps>
 
-          <el-alert v-if="generating" class="stage-alert" :title="currentStageText" type="info" show-icon :closable="false" />
+          <el-alert v-if="generating" class="stage-alert" :title="currentStageText" type="info" show-icon :closable="false">
+            <template #default>
+              <div class="stage-hint">上方步骤为处理链路示意，实际进度以后端返回结果为准。</div>
+            </template>
+          </el-alert>
           <el-alert v-else-if="result" class="stage-alert" title="生成完成：可以在下方预览结果，也可以跳转到用例集详情页查看脑图。" type="success" show-icon :closable="false" />
           <el-alert v-else class="stage-alert" title="等待输入需求并开始生成。" type="info" show-icon :closable="false" />
         </div>
@@ -278,21 +282,19 @@ async function handleGenerate() {
 }
 
 function startStageProgress() {
+  // 说明：后端当前是单次同步请求，无法返回真实阶段进度。
+  // 这里仅展示处理链路示意，完成后跳到完成态。
   const texts = [
-    '正在读取知识库配置...',
-    '正在从FAISS索引召回相似知识片段...',
-    '正在组织Prompt并调用DeepSeek...',
-    '正在解析AI返回的树形JSON...',
-    '正在保存用例集与节点历史版本...'
+    '正在调用后端生成服务（RAG检索 → AI生成 → 结果入库）...',
+    '后端处理中，请耐心等待...'
   ]
   activeStage.value = 1
   currentStageText.value = texts[0]
   let index = 0
   stageTimer = window.setInterval(() => {
     index = Math.min(index + 1, texts.length - 1)
-    activeStage.value = Math.min(index + 1, stages.length - 1)
     currentStageText.value = texts[index]
-  }, 1800)
+  }, 3000)
 }
 
 function stopStageProgress() {
@@ -429,6 +431,12 @@ onBeforeUnmount(stopStageProgress)
 
 .stage-alert {
   margin-top: 22px;
+}
+
+.stage-hint {
+  margin-top: 6px;
+  color: #94a3b8;
+  font-size: 12px;
 }
 
 .preview-card {

@@ -45,11 +45,14 @@ def api_create_case_set(
 
 @router.get("/case-sets", response_model=CaseSetPageOut)
 def api_list_case_sets(
+    keyword: str | None = Query(default=None),
+    source_type: str | None = Query(default=None),
+    status: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=10, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
-    return list_case_sets(db, page, page_size)
+    return list_case_sets(db, page, page_size, keyword, source_type, status)
 
 
 @router.delete("/case-sets/{case_set_id}")
