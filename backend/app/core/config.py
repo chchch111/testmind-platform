@@ -49,6 +49,8 @@ class Settings(BaseSettings):
     auth_secret_key: str = "rag-mindmap-dev-secret-change-me"
     auth_token_expire_minutes: int = 60 * 24
 
+    max_upload_mb: int = 20
+
     cors_origins: str = ""
 
     model_config = SettingsConfigDict(

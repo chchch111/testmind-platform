@@ -1,38 +1,30 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
-import MainLayout from '../layout/MainLayout.vue'
-import Dashboard from '../views/Dashboard.vue'
-import CaseSetList from '../views/CaseSetList.vue'
-import CaseSetDetail from '../views/CaseSetDetail.vue'
-import KnowledgeBase from '../views/KnowledgeBase.vue'
-import AiGenerate from '../views/AiGenerate.vue'
-import Login from '../views/Login.vue'
-import PermissionManagement from '../views/PermissionManagement.vue'
-import Forbidden from '../views/Forbidden.vue'
-import TaskList from '../views/TaskList.vue'
-import TaskDetail from '../views/TaskDetail.vue'
-import ExecutorWork from '../views/ExecutorWork.vue'
 import { getCurrentUser, isLoggedIn } from '../utils/storage'
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/login', component: Login, meta: { title: '登录' } },
+    {
+      path: '/login',
+      component: () => import('../views/Login.vue'),
+      meta: { title: '登录' }
+    },
     {
       path: '/',
-      component: MainLayout,
+      component: () => import('../layout/MainLayout.vue'),
       children: [
         { path: '', redirect: '/dashboard' },
-        { path: 'dashboard', component: Dashboard, meta: { title: '首页概览' } },
-        { path: 'case-sets', component: CaseSetList, meta: { title: '用例集管理' } },
-        { path: 'case-sets/:id', component: CaseSetDetail, meta: { title: '用例集详情' } },
-        { path: 'knowledge-bases', component: KnowledgeBase, meta: { title: '知识库管理' } },
-        { path: 'ai-generate', component: AiGenerate, meta: { title: 'AI生成用例' } },
-        { path: 'permissions', component: PermissionManagement, meta: { title: '权限管理', requiresAdmin: true } },
-        { path: '403', component: Forbidden, meta: { title: '无权限访问' } },
-        { path: 'tasks', component: TaskList, meta: { title: '测试任务管理' } },
-        { path: 'tasks/:id', component: TaskDetail, meta: { title: '测试任务详情' } },
-        { path: 'executor', component: ExecutorWork, meta: { title: '执行工作台' } }
+        { path: 'dashboard', component: () => import('../views/Dashboard.vue'), meta: { title: '首页概览' } },
+        { path: 'case-sets', component: () => import('../views/CaseSetList.vue'), meta: { title: '用例集管理' } },
+        { path: 'case-sets/:id', component: () => import('../views/CaseSetDetail.vue'), meta: { title: '用例集详情' } },
+        { path: 'knowledge-bases', component: () => import('../views/KnowledgeBase.vue'), meta: { title: '知识库管理' } },
+        { path: 'ai-generate', component: () => import('../views/AiGenerate.vue'), meta: { title: 'AI生成用例' } },
+        { path: 'permissions', component: () => import('../views/PermissionManagement.vue'), meta: { title: '权限管理', requiresAdmin: true } },
+        { path: '403', component: () => import('../views/Forbidden.vue'), meta: { title: '无权限访问' } },
+        { path: 'tasks', component: () => import('../views/TaskList.vue'), meta: { title: '测试任务管理' } },
+        { path: 'tasks/:id', component: () => import('../views/TaskDetail.vue'), meta: { title: '测试任务详情' } },
+        { path: 'executor', component: () => import('../views/ExecutorWork.vue'), meta: { title: '执行工作台' } }
       ]
     }
   ]

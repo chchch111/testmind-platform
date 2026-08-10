@@ -55,6 +55,7 @@
             <template #default="{ row }">
               <span v-if="row.case_node_title">{{ row.case_node_title }}</span>
               <span v-else>#{{ row.case_node_id }}</span>
+              <el-tag v-if="row.case_node_deleted" size="small" type="danger" class="deleted-tag">已删除</el-tag>
             </template>
           </el-table-column>
           <el-table-column label="执行状态" width="120">
@@ -284,6 +285,10 @@ onMounted(loadExecutorTasks)
 .claim-tip {
   margin-left: 8px;
   flex: 1;
+}
+
+.deleted-tag {
+  margin-left: 6px;
 }
 
 .executor-tools {

@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_active_user
 from app.db.deps import get_db
+from app.models.case import TestCaseSet
 from app.models.user import User
 from app.schemas.case import (
     CaseNodeCreate,
@@ -13,7 +14,6 @@ from app.schemas.case import (
     CaseSetCreate,
     CaseSetOut,
     CaseSetPageOut,
-    DeleteRequest,
     RollbackRequest,
 )
 from app.services.case_service import (
@@ -59,7 +59,6 @@ def api_list_case_sets(
 @router.delete("/case-sets/{case_set_id}")
 def api_delete_case_set(
     case_set_id: int,
-    data: DeleteRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -90,6 +89,31 @@ def api_get_case_tree(case_set_id: int, db: Session = Depends(get_db)):
     return get_case_tree(db, case_set_id)
 
 
+@router.get("/case-sets/{case_set_id}/export-json")
+def api_export_case_set_json(case_set_id: int, db: Session = Depends(get_db)):
+    """导出用例集树为 JSON，便于备份或迁移。"""
+    from fastapi.responses import JSONResponse
+
+    case_set = db.get(TestCaseSet, case_set_id)
+    if not case_set or case_set.is_deleted == 1:
+        raise HTTPException(status_code=404, detail="用例集不存在")
+
+    payload = {
+        "case_set": {
+            "case_set_id": case_set.case_set_id,
+            "name": case_set.name,
+            "description": case_set.description,
+            "source_type": case_set.source_type,
+            "status": case_set.status,
+            "created_at": case_set.created_at.isoformat() if case_set.created_at else None,
+            "updated_at": case_set.updated_at.isoformat() if case_set.updated_at else None,
+        },
+        "tree": get_case_tree(db, case_set_id),
+    }
+    filename = f"case_set_{case_set_id}.json"
+    return JSONResponse(content=payload, headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
 @router.get("/case-nodes/{node_id}", response_model=CaseNodeOut)
 def api_get_case_node(node_id: int, db: Session = Depends(get_db)):
     return get_case_node(db, node_id)
@@ -109,7 +133,6 @@ def api_update_case_node(
 @router.delete("/case-nodes/{node_id}")
 def api_delete_case_node(
     node_id: int,
-    data: DeleteRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):

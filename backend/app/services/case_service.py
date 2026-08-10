@@ -1,8 +1,9 @@
 from fastapi import HTTPException
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.ai import AiGenerationRecord
+from app.models.canvas import CaseNodeMeta, CaseSetReview, CaseSetSnapshot
 from app.models.case import TestCaseNode, TestCaseNodeVersion, TestCaseSet
 from app.models.user import User
 from app.schemas.case import CaseNodeCreate, CaseNodeUpdate, CaseSetCreate
@@ -266,6 +267,11 @@ def delete_case_set(db: Session, case_set_id: int, operator_id: int) -> dict:
     for node in nodes:
         node.is_deleted = 1
         node.updated_by = operator_id
+
+    # 级联清理脑图元数据、快照、评审记录（纯展示数据，物理删除避免遗留垃圾）。
+    db.execute(delete(CaseNodeMeta).where(CaseNodeMeta.case_set_id == case_set_id))
+    db.execute(delete(CaseSetSnapshot).where(CaseSetSnapshot.case_set_id == case_set_id))
+    db.execute(delete(CaseSetReview).where(CaseSetReview.case_set_id == case_set_id))
 
     db.commit()
     return {"message": "用例集删除成功", "case_set_id": case_set_id, "deleted_nodes": len(nodes)}

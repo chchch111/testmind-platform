@@ -99,6 +99,13 @@ def upload_knowledge_source_file(db: Session, knowledge_base_id: int, file: Uplo
     if not any(lower_name.endswith(ext) for ext in (".txt", ".md", ".xmind")):
         raise HTTPException(status_code=400, detail="只支持上传 .txt、.md 或 .xmind 文件")
 
+    file.file.seek(0, 2)
+    file_size = file.file.tell()
+    file.file.seek(0)
+    max_bytes = settings.max_upload_mb * 1024 * 1024
+    if file_size > max_bytes:
+        raise HTTPException(status_code=400, detail=f"文件过大，最大允许 {settings.max_upload_mb}MB")
+
     if lower_name.endswith(".xmind"):
         content_text = extract_xmind_text(file)
         source_type = "xmind_case"

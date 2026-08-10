@@ -23,6 +23,13 @@ def import_xmind_file(db: Session, file: UploadFile, created_by: int) -> dict:
     if not file.filename or not file.filename.lower().endswith(".xmind"):
         raise HTTPException(status_code=400, detail="只支持上传.xmind文件")
 
+    file.file.seek(0, 2)
+    file_size = file.file.tell()
+    file.file.seek(0)
+    max_bytes = settings.max_upload_mb * 1024 * 1024
+    if file_size > max_bytes:
+        raise HTTPException(status_code=400, detail=f"文件过大，最大允许 {settings.max_upload_mb}MB")
+
     upload_dir = Path(settings.upload_root) / "xmind"
     upload_dir.mkdir(parents=True, exist_ok=True)
 

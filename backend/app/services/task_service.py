@@ -415,12 +415,15 @@ def enrich_executions(db: Session, executions: list[TestExecutionRecord]) -> lis
     for execution in executions:
         snapshot = execution.case_node_snapshot or {}
         node = node_map.get(execution.case_node_id)
+        # 节点被逻辑删除后 node 查不到；快照仍能展示标题，但标记为已失效。
+        case_node_deleted = bool(snapshot) and node is None and execution.case_node_snapshot is not None
         item = {
             "execution_id": execution.execution_id,
             "task_id": execution.task_id,
             "case_node_id": execution.case_node_id,
             "case_node_title": snapshot.get("title") or (node.title if node else None),
             "case_node_priority": snapshot.get("priority") or (node.priority if node else None),
+            "case_node_deleted": case_node_deleted,
             "executor_id": execution.executor_id,
             "execution_status": execution.execution_status,
             "actual_result": execution.actual_result,

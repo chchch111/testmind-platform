@@ -52,6 +52,7 @@ class ExecutionOut(BaseModel):
     case_node_title: str | None = None
     case_node_priority: str | None = None
     case_node_snapshot: dict | None = None
+    case_node_deleted: bool | None = None
     executor_id: int
     execution_status: str
     actual_result: str | None

@@ -40,11 +40,12 @@
       <el-table-column label="创建时间" width="190">
         <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="430" fixed="right">
+      <el-table-column label="操作" width="510" fixed="right">
         <template #default="{ row }">
           <el-button size="small" type="primary" @click="$router.push(`/case-sets/${row.case_set_id}`)">查看树</el-button>
           <el-button v-if="row.status === 'draft'" size="small" type="success" @click="handlePublish(row)">发布</el-button>
           <el-button size="small" type="success" :loading="exportingId === row.case_set_id" @click="handleExport(row)">导出XMind</el-button>
+          <el-button size="small" type="info" :loading="exportingJsonId === row.case_set_id" @click="handleExportJson(row)">导出JSON</el-button>
           <el-button size="small" type="danger" @click="handleDelete(row)">删除</el-button>
         </template>
       </el-table-column>
@@ -79,7 +80,7 @@
 <script setup>
 import { ElMessageBox } from 'element-plus'
 import { onMounted, reactive, ref, watch } from 'vue'
-import { createCaseSet, deleteCaseSet, listCaseSets, publishCaseSet } from '../api/case'
+import { createCaseSet, deleteCaseSet, exportCaseSetJson, listCaseSets, publishCaseSet } from '../api/case'
 import { getCaseSetMetas } from '../api/canvas'
 import { exportXmind, importXmind } from '../api/xmind'
 import { SOURCE_TYPE_TEXT, STATUS_TEXT } from '../utils/constants'
@@ -91,6 +92,7 @@ const loading = ref(false)
 const creating = ref(false)
 const importing = ref(false)
 const exportingId = ref(null)
+const exportingJsonId = ref(null)
 const caseSets = ref([])
 const total = ref(0)
 const page = ref(1)
@@ -219,6 +221,17 @@ async function handleExport(row) {
     showSuccess(`XMind导出成功：${fileName}`)
   } finally {
     exportingId.value = null
+  }
+}
+
+async function handleExportJson(row) {
+  exportingJsonId.value = row.case_set_id
+  try {
+    const blob = await exportCaseSetJson(row.case_set_id)
+    downloadBlob(blob, `case_set_${row.case_set_id}.json`)
+    showSuccess('用例集JSON导出成功')
+  } finally {
+    exportingJsonId.value = null
   }
 }
 

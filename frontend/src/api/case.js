@@ -8,8 +8,8 @@ export function createCaseSet(data) {
   return request.post('/api/case-sets', data)
 }
 
-export function deleteCaseSet(caseSetId, data) {
-  return request.delete(`/api/case-sets/${caseSetId}`, { data })
+export function deleteCaseSet(caseSetId) {
+  return request.delete(`/api/case-sets/${caseSetId}`)
 }
 
 export function publishCaseSet(caseSetId) {
@@ -18,6 +18,13 @@ export function publishCaseSet(caseSetId) {
 
 export function getCaseTree(caseSetId) {
   return request.get(`/api/case-sets/${caseSetId}/tree`)
+}
+
+export function exportCaseSetJson(caseSetId) {
+  return request.get(`/api/case-sets/${caseSetId}/export-json`, {
+    responseType: 'blob',
+    timeout: 120000
+  })
 }
 
 export function createCaseNode(data) {
@@ -32,8 +39,8 @@ export function updateCaseNode(nodeId, data) {
   return request.put(`/api/case-nodes/${nodeId}`, data)
 }
 
-export function deleteCaseNode(nodeId, data) {
-  return request.delete(`/api/case-nodes/${nodeId}`, { data })
+export function deleteCaseNode(nodeId) {
+  return request.delete(`/api/case-nodes/${nodeId}`)
 }
 
 export function listNodeVersions(nodeId) {

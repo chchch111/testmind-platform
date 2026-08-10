@@ -97,6 +97,7 @@
               <template #default="{ row }">
                 <span v-if="row.case_node_title">{{ row.case_node_title }}</span>
                 <span v-else>#{{ row.case_node_id }}</span>
+                <el-tag v-if="row.case_node_deleted" size="small" type="danger" class="deleted-tag">已删除</el-tag>
               </template>
             </el-table-column>
             <el-table-column prop="executor_id" label="执行人ID" width="110" />
@@ -540,4 +541,8 @@ onMounted(loadDetail)
 .success-text { color: #16a34a; font-weight: 700; }
 .danger-text { color: #dc2626; font-weight: 700; }
 .warning-text { color: #d97706; font-weight: 700; }
+
+.deleted-tag {
+  margin-left: 6px;
+}
 </style>
