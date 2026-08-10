@@ -71,7 +71,17 @@ class CaseNodeOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class CaseNodeTreeOut(CaseNodeOut):
+class CaseNodeTreeOut(BaseModel):
+    node_id: int
+    case_set_id: int
+    parent_id: int | None
+    node_type: str
+    title: str
+    precondition: str | None
+    test_steps: str | None
+    expected_result: str | None
+    priority: str
+    sort_order: int
     children: list["CaseNodeTreeOut"] = Field(default_factory=list)
 
 

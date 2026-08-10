@@ -145,7 +145,7 @@ def get_case_tree(db: Session, case_set_id: int) -> list[dict]:
         .order_by(TestCaseNode.parent_id.asc(), TestCaseNode.sort_order.asc(), TestCaseNode.node_id.asc())
     )
     nodes = list(db.scalars(statement).all())
-    node_map = {node.node_id: node_to_dict(node) | {"children": []} for node in nodes}
+    node_map = {node.node_id: node_to_tree_dict(node) | {"children": []} for node in nodes}
     roots = []
 
     for node in nodes:
@@ -156,6 +156,22 @@ def get_case_tree(db: Session, case_set_id: int) -> list[dict]:
             roots.append(item)
 
     return roots
+
+
+def node_to_tree_dict(node: TestCaseNode) -> dict:
+    """树接口专用序列化，去掉前端不用的审计字段，降低大树负载。"""
+    return {
+        "node_id": node.node_id,
+        "case_set_id": node.case_set_id,
+        "parent_id": node.parent_id,
+        "node_type": node.node_type,
+        "title": node.title,
+        "precondition": node.precondition,
+        "test_steps": node.test_steps,
+        "expected_result": node.expected_result,
+        "priority": node.priority,
+        "sort_order": node.sort_order,
+    }
 
 
 def update_case_node(db: Session, node_id: int, data: CaseNodeUpdate) -> TestCaseNode:

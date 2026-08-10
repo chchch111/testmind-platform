@@ -129,6 +129,7 @@ const emit = defineEmits([
 const scrollRef = ref(null)
 const dragging = ref(false)
 const selectionVisible = ref(false)
+let viewportRafId = null
 const dragState = reactive({
   startX: 0,
   startY: 0,
@@ -227,25 +228,32 @@ function emitViewportChange() {
   if (!scrollRef.value) {
     return
   }
-  const scrollRect = scrollRef.value.getBoundingClientRect()
-  const nodes = Array.from(scrollRef.value.querySelectorAll('.mind-node[data-node-id]')).map(element => {
-    const rect = element.getBoundingClientRect()
-    return {
-      id: Number(element.dataset.nodeId),
-      x: rect.left - scrollRect.left + scrollRef.value.scrollLeft + rect.width / 2,
-      y: rect.top - scrollRect.top + scrollRef.value.scrollTop + rect.height / 2,
-      width: rect.width,
-      height: rect.height
-    }
-  })
-  emit('viewport-change', {
-    scrollLeft: scrollRef.value.scrollLeft,
-    scrollTop: scrollRef.value.scrollTop,
-    clientWidth: scrollRef.value.clientWidth,
-    clientHeight: scrollRef.value.clientHeight,
-    scrollWidth: scrollRef.value.scrollWidth,
-    scrollHeight: scrollRef.value.scrollHeight,
-    nodes
+  // 用 rAF 节流：滚动/拖拽期间全量测量 DOM 只在一帧内执行一次，避免卡顿。
+  if (viewportRafId !== null) {
+    return
+  }
+  viewportRafId = window.requestAnimationFrame(() => {
+    viewportRafId = null
+    const scrollRect = scrollRef.value.getBoundingClientRect()
+    const nodes = Array.from(scrollRef.value.querySelectorAll('.mind-node[data-node-id]')).map(element => {
+      const rect = element.getBoundingClientRect()
+      return {
+        id: Number(element.dataset.nodeId),
+        x: rect.left - scrollRect.left + scrollRef.value.scrollLeft + rect.width / 2,
+        y: rect.top - scrollRect.top + scrollRef.value.scrollTop + rect.height / 2,
+        width: rect.width,
+        height: rect.height
+      }
+    })
+    emit('viewport-change', {
+      scrollLeft: scrollRef.value.scrollLeft,
+      scrollTop: scrollRef.value.scrollTop,
+      clientWidth: scrollRef.value.clientWidth,
+      clientHeight: scrollRef.value.clientHeight,
+      scrollWidth: scrollRef.value.scrollWidth,
+      scrollHeight: scrollRef.value.scrollHeight,
+      nodes
+    })
   })
 }
 
@@ -362,9 +370,9 @@ function resetView() {
 }
 
 watch(
-  () => JSON.stringify(props.treeData),
+  () => props.treeData,
   value => {
-    if (value) {
+    if (value && value.length) {
       centerRootNodeAfterRender()
     }
   },
@@ -389,6 +397,10 @@ watch(
 
 onBeforeUnmount(() => {
   stopDragging()
+  if (viewportRafId !== null) {
+    window.cancelAnimationFrame(viewportRafId)
+    viewportRafId = null
+  }
   window.removeEventListener('mousemove', handleSelectionMove)
   window.removeEventListener('mouseup', stopBoxSelection)
 })
