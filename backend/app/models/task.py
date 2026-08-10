@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, DateTime, ForeignKey, String, Text
+from sqlalchemy import JSON, BigInteger, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
@@ -50,6 +50,7 @@ class TestExecutionRecord(Base):
     execution_status: Mapped[str] = mapped_column(String(30), nullable=False, default="not_run")
     actual_result: Mapped[str | None] = mapped_column(Text)
     bug_description: Mapped[str | None] = mapped_column(Text)
+    case_node_snapshot: Mapped[dict | None] = mapped_column(JSON)
     sync_status: Mapped[str] = mapped_column(String(30), nullable=False, default="synced")
     sync_version: Mapped[int] = mapped_column(nullable=False, default=1)
     executed_at: Mapped[DateTime | None] = mapped_column(DateTime)

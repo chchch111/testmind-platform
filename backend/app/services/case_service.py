@@ -2,6 +2,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from app.models.ai import AiGenerationRecord
 from app.models.case import TestCaseNode, TestCaseNodeVersion, TestCaseSet
 from app.models.user import User
 from app.schemas.case import CaseNodeCreate, CaseNodeUpdate, CaseSetCreate
@@ -57,12 +58,49 @@ def list_case_sets(
         .offset((page - 1) * page_size)
         .limit(page_size)
     )
+    items = list(db.scalars(statement).all())
     return {
         "total": total,
         "page": page,
         "page_size": page_size,
-        "items": list(db.scalars(statement).all()),
+        "items": enrich_case_sets(db, items),
     }
+
+
+def enrich_case_sets(db: Session, items: list[TestCaseSet]) -> list[dict]:
+    """给 AI 生成的用例集附带来源需求与生成记录，实现需求→用例追溯。"""
+    if not items:
+        return []
+
+    ai_case_set_ids = [item.case_set_id for item in items if item.source_type == "ai_generated"]
+    record_map = {}
+    if ai_case_set_ids:
+        records = list(
+            db.scalars(
+                select(AiGenerationRecord).where(AiGenerationRecord.case_set_id.in_(ai_case_set_ids))
+            ).all()
+        )
+        record_map = {record.case_set_id: record for record in records}
+
+    result = []
+    for item in items:
+        case_set_dict = {
+            "case_set_id": item.case_set_id,
+            "name": item.name,
+            "description": item.description,
+            "source_type": item.source_type,
+            "status": item.status,
+            "created_by": item.created_by,
+            "updated_by": item.updated_by,
+            "created_at": item.created_at,
+            "updated_at": item.updated_at,
+        }
+        record = record_map.get(item.case_set_id)
+        if record:
+            case_set_dict["generation_id"] = record.generation_id
+            case_set_dict["requirement_text"] = record.requirement_text
+        result.append(case_set_dict)
+    return result
 
 
 def get_case_node(db: Session, node_id: int) -> TestCaseNode:
@@ -231,6 +269,21 @@ def delete_case_set(db: Session, case_set_id: int, operator_id: int) -> dict:
 
     db.commit()
     return {"message": "用例集删除成功", "case_set_id": case_set_id, "deleted_nodes": len(nodes)}
+
+
+def publish_case_set(db: Session, case_set_id: int, operator_id: int) -> TestCaseSet:
+    """把 AI 生成或草稿状态的用例集发布为正式可用（active）。"""
+    ensure_user_exists(db, operator_id)
+    case_set = db.get(TestCaseSet, case_set_id)
+    if not case_set or case_set.is_deleted == 1:
+        raise HTTPException(status_code=404, detail="用例集不存在")
+    if case_set.status != "draft":
+        raise HTTPException(status_code=400, detail="只有草稿状态的用例集可以发布")
+    case_set.status = "active"
+    case_set.updated_by = operator_id
+    db.commit()
+    db.refresh(case_set)
+    return case_set
 
 
 def delete_case_node(db: Session, node_id: int, operator_id: int) -> dict:

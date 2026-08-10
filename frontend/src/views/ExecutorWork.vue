@@ -12,8 +12,15 @@
           <el-select v-model="executionFilter" clearable placeholder="全部执行状态" class="status-filter">
             <el-option v-for="option in executionStatusOptions" :key="option.value" :label="option.label" :value="option.value" />
           </el-select>
+          <el-select v-model="priorityFilter" clearable placeholder="全部优先级" class="status-filter">
+            <el-option label="P0 高危" value="P0" />
+            <el-option label="P1 重要" value="P1" />
+            <el-option label="P2 一般" value="P2" />
+            <el-option label="P3 较低" value="P3" />
+          </el-select>
           <el-button @click="executionFilter = 'failed'">只看失败</el-button>
           <el-button @click="executionFilter = 'blocked'">只看阻塞</el-button>
+          <el-button @click="sortByPriority = !sortByPriority">按优先级排序</el-button>
           <el-button type="primary" :loading="loading" @click="loadExecutorTasks">批量同步任务</el-button>
         </div>
       </div>
@@ -26,7 +33,11 @@
             <h2>{{ item.task.task_name }}</h2>
             <p>{{ item.task.description || '暂无任务描述' }}</p>
           </div>
-          <el-tag type="success">{{ STATUS_TEXT[item.task.status] || item.task.status }}</el-tag>
+          <div class="task-header-right">
+            <el-tag :type="isClaimed(item) ? 'success' : 'warning'">{{ isClaimed(item) ? '已认领' : '待认领' }}</el-tag>
+            <el-tag type="success">{{ STATUS_TEXT[item.task.status] || item.task.status }}</el-tag>
+            <el-button v-if="!isClaimed(item)" size="small" type="primary" @click="handleAssignTask(item)">认领任务</el-button>
+          </div>
         </div>
 
         <div class="execution-summary">
@@ -51,21 +62,27 @@
               <el-tag :type="statusTagType(row.execution_status)">{{ EXECUTION_STATUS_TEXT[row.execution_status] || row.execution_status }}</el-tag>
             </template>
           </el-table-column>
+          <el-table-column label="优先级" width="90">
+            <template #default="{ row }">
+              <el-tag size="small" :type="priorityTagType(row.case_node_priority)">{{ row.case_node_priority || 'P1' }}</el-tag>
+            </template>
+          </el-table-column>
           <el-table-column prop="actual_result" label="实际结果" min-width="240" />
           <el-table-column prop="bug_description" label="缺陷描述" min-width="200" />
           <el-table-column prop="sync_version" label="同步版本" width="90" />
           <el-table-column label="操作" width="150" fixed="right">
             <template #default="{ row }">
-              <el-button size="small" type="primary" @click="openRadialMenu($event, row)">状态菜单</el-button>
+              <el-button size="small" type="primary" :disabled="!isClaimed(item)" @click="openRadialMenu($event, row)">状态菜单</el-button>
             </template>
           </el-table-column>
         </el-table>
 
         <div class="batch-actions">
           <span>批量修改选中记录：</span>
-          <el-button size="small" type="success" @click="batchUpdate(item.task.task_id, 'passed')">通过</el-button>
-          <el-button size="small" type="danger" @click="batchUpdate(item.task.task_id, 'failed')">失败</el-button>
-          <el-button size="small" type="warning" @click="batchUpdate(item.task.task_id, 'blocked')">阻塞</el-button>
+          <el-button size="small" type="success" :disabled="!isClaimed(item)" @click="batchUpdate(item.task.task_id, 'passed')">通过</el-button>
+          <el-button size="small" type="danger" :disabled="!isClaimed(item)" @click="batchUpdate(item.task.task_id, 'failed')">失败</el-button>
+          <el-button size="small" type="warning" :disabled="!isClaimed(item)" @click="batchUpdate(item.task.task_id, 'blocked')">阻塞</el-button>
+          <el-alert v-if="!isClaimed(item)" type="warning" :closable="false" show-icon class="claim-tip" title="请先认领任务，再提交执行结果" />
         </div>
       </div>
     </div>
@@ -86,7 +103,7 @@
 
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
-import { getExecutorTasks, updateExecution } from '../api/task'
+import { assignTask, getExecutorTasks, updateExecution } from '../api/task'
 import ExecutionRadialMenu from '../components/ExecutionRadialMenu.vue'
 import { EXECUTION_STATUS_TEXT, STATUS_TEXT } from '../utils/constants'
 import { showSuccess, showWarning } from '../utils/message'
@@ -94,6 +111,8 @@ import { getCurrentUserId } from '../utils/storage'
 
 const executorId = ref(getCurrentUserId())
 const executionFilter = ref('')
+const priorityFilter = ref('')
+const sortByPriority = ref(false)
 const loading = ref(false)
 const tasks = ref([])
 const selectedRowsMap = reactive({})
@@ -123,14 +142,32 @@ function handleSelectionChange(taskId, rows) {
 }
 
 function filteredExecutions(executions) {
-  if (!executionFilter.value) {
-    return executions
+  let result = executions
+  if (executionFilter.value) {
+    result = result.filter(row => row.execution_status === executionFilter.value)
   }
-  return executions.filter(row => row.execution_status === executionFilter.value)
+  if (priorityFilter.value) {
+    result = result.filter(row => (row.case_node_priority || 'P1') === priorityFilter.value)
+  }
+  if (sortByPriority.value) {
+    const order = { P0: 0, P1: 1, P2: 2, P3: 3 }
+    result = [...result].sort((a, b) => (order[a.case_node_priority || 'P1'] ?? 9) - (order[b.case_node_priority || 'P1'] ?? 9))
+  }
+  return result
 }
 
 function countExecutionStatus(executions, status) {
   return executions.filter(row => row.execution_status === status).length
+}
+
+function isClaimed(item) {
+  return item.assign_status === 'accepted'
+}
+
+async function handleAssignTask(item) {
+  await assignTask(item.task.task_id)
+  showSuccess('任务已认领，可以开始执行')
+  await loadExecutorTasks()
 }
 
 function openRadialMenu(event, row) {
@@ -214,6 +251,13 @@ function statusTagType(status) {
   return 'info'
 }
 
+function priorityTagType(priority) {
+  if (priority === 'P0') return 'danger'
+  if (priority === 'P1') return 'warning'
+  if (priority === 'P2') return 'info'
+  return 'info'
+}
+
 onMounted(loadExecutorTasks)
 </script>
 
@@ -229,6 +273,17 @@ onMounted(loadExecutorTasks)
   display: flex;
   justify-content: space-between;
   gap: 16px;
+}
+
+.task-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.claim-tip {
+  margin-left: 8px;
+  flex: 1;
 }
 
 .executor-tools {

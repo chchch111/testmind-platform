@@ -10,6 +10,7 @@
           <el-button @click="$router.push('/tasks')">返回任务列表</el-button>
           <el-button type="primary" :loading="loading" @click="loadDetail">刷新</el-button>
           <el-button type="success" @click="$router.push('/executor')">进入执行工作台</el-button>
+          <el-button type="warning" :loading="reportLoading" :disabled="!task" @click="openReport">查看报告</el-button>
           <el-button type="warning" :disabled="!task || task.status === 'cancelled' || task.status === 'finished'" @click="handleCancelTask">取消任务</el-button>
           <el-button type="danger" :disabled="!task" @click="handleDeleteTask">删除任务</el-button>
         </div>
@@ -152,13 +153,67 @@
         <el-button type="primary" :loading="updating" @click="handleUpdateExecution">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="reportVisible" title="测试报告" width="820px">
+      <template v-if="report">
+        <div class="report-overview">
+          <div class="report-stat"><span>总用例</span><strong>{{ report.total }}</strong></div>
+          <div class="report-stat success-stat"><span>通过</span><strong>{{ report.passed }}</strong></div>
+          <div class="report-stat danger-stat"><span>失败</span><strong>{{ report.failed }}</strong></div>
+          <div class="report-stat warning-stat"><span>阻塞</span><strong>{{ report.blocked }}</strong></div>
+          <div class="report-stat info-stat"><span>未执行</span><strong>{{ report.not_run }}</strong></div>
+          <div class="report-stat"><span>通过率</span><strong>{{ (report.pass_rate * 100).toFixed(1) }}%</strong></div>
+        </div>
+
+        <h3 class="report-section-title">按执行人统计</h3>
+        <el-table :data="report.per_executor" border size="small">
+          <el-table-column prop="executor_id" label="执行人ID" width="110" />
+          <el-table-column prop="total" label="总数" width="80" />
+          <el-table-column label="通过" width="90">
+            <template #default="{ row }"><span class="success-text">{{ row.passed }}</span></template>
+          </el-table-column>
+          <el-table-column label="失败" width="90">
+            <template #default="{ row }"><span class="danger-text">{{ row.failed }}</span></template>
+          </el-table-column>
+          <el-table-column label="阻塞" width="90">
+            <template #default="{ row }"><span class="warning-text">{{ row.blocked }}</span></template>
+          </el-table-column>
+          <el-table-column label="通过率">
+            <template #default="{ row }">{{ row.total ? ((row.passed / row.total) * 100).toFixed(1) : 0 }}%</template>
+          </el-table-column>
+        </el-table>
+
+        <h3 class="report-section-title">缺陷汇总（{{ report.defects.length }} 条）</h3>
+        <el-table v-if="report.defects.length" :data="report.defects" border size="small">
+          <el-table-column label="用例节点" min-width="180" show-overflow-tooltip>
+            <template #default="{ row }">{{ row.case_node_title || `#${row.case_node_id}` }}</template>
+          </el-table-column>
+          <el-table-column label="优先级" width="90">
+            <template #default="{ row }">{{ row.case_node_priority || '-' }}</template>
+          </el-table-column>
+          <el-table-column label="执行人" width="90">
+            <template #default="{ row }">{{ row.executor_id }}</template>
+          </el-table-column>
+          <el-table-column label="状态" width="80">
+            <template #default="{ row }">
+              <el-tag :type="row.execution_status === 'failed' ? 'danger' : 'warning'">{{ row.execution_status === 'failed' ? '失败' : '阻塞' }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="bug_description" label="缺陷描述" min-width="200" show-overflow-tooltip />
+        </el-table>
+        <el-empty v-else description="暂无缺陷" />
+      </template>
+      <template #footer>
+        <el-button @click="reportVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { cancelTask, deleteTask, getTaskDetail, listTaskExecutions, updateExecution } from '../api/task'
+import { cancelTask, deleteTask, getTaskDetail, getTaskReport, listTaskExecutions, updateExecution } from '../api/task'
 import { EXECUTION_STATUS_TEXT, STATUS_TEXT } from '../utils/constants'
 import { confirmAction, showSuccess, showWarning } from '../utils/message'
 
@@ -167,6 +222,9 @@ const router = useRouter()
 const taskId = Number(route.params.id)
 const loading = ref(false)
 const updating = ref(false)
+const reportLoading = ref(false)
+const reportVisible = ref(false)
+const report = ref(null)
 const task = ref(null)
 const executions = ref([])
 const executionDialogVisible = ref(false)
@@ -215,6 +273,16 @@ async function loadDetail() {
     executions.value = executionList
   } finally {
     loading.value = false
+  }
+}
+
+async function openReport() {
+  reportLoading.value = true
+  try {
+    report.value = await getTaskReport(taskId)
+    reportVisible.value = true
+  } finally {
+    reportLoading.value = false
   }
 }
 
@@ -430,4 +498,46 @@ onMounted(loadDetail)
 .filter-select {
   width: 150px;
 }
+
+.report-overview {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.report-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.report-stat span {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.report-stat strong {
+  color: #1f2937;
+  font-size: 22px;
+}
+
+.report-stat.success-stat strong { color: #16a34a; }
+.report-stat.danger-stat strong { color: #dc2626; }
+.report-stat.warning-stat strong { color: #d97706; }
+.report-stat.info-stat strong { color: #2563eb; }
+
+.report-section-title {
+  margin: 18px 0 10px;
+  color: #334155;
+  font-size: 16px;
+}
+
+.success-text { color: #16a34a; font-weight: 700; }
+.danger-text { color: #dc2626; font-weight: 700; }
+.warning-text { color: #d97706; font-weight: 700; }
 </style>

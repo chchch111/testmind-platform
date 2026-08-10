@@ -51,6 +51,7 @@ class ExecutionOut(BaseModel):
     case_node_id: int
     case_node_title: str | None = None
     case_node_priority: str | None = None
+    case_node_snapshot: dict | None = None
     executor_id: int
     execution_status: str
     actual_result: str | None
@@ -75,4 +76,5 @@ class ExecutionUpdate(BaseModel):
 
 class ExecutorTaskOut(BaseModel):
     task: TaskOut
+    assign_status: str | None = None
     executions: list[ExecutionOut]

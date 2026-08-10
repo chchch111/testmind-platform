@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.models.canvas import CaseNodeMeta, CaseSetReview, CaseSetSnapshot
 from app.models.case import TestCaseSet
-from app.schemas.canvas import CaseSetMetaSaveRequest, ReviewCreate, SnapshotCreate
+from app.schemas.canvas import CaseSetMetaSaveRequest, ReviewCreate, ReviewUpdate, SnapshotCreate
 from app.services.case_service import ensure_user_exists
 
 VALID_META_TYPES = {"tag", "note", "link", "image", "review"}
@@ -129,3 +129,19 @@ def list_reviews(db: Session, case_set_id: int) -> list[CaseSetReview]:
         .limit(50)
     )
     return list(db.scalars(statement).all())
+
+
+def update_review(db: Session, review_id: int, data: ReviewUpdate, operator_id: int) -> CaseSetReview:
+    ensure_user_exists(db, operator_id)
+    review = db.get(CaseSetReview, review_id)
+    if not review:
+        raise HTTPException(status_code=404, detail="评审记录不存在")
+
+    if data.status is not None:
+        review.status = data.status
+    if data.conclusion is not None:
+        review.conclusion = data.conclusion
+
+    db.commit()
+    db.refresh(review)
+    return review

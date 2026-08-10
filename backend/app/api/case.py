@@ -25,6 +25,7 @@ from app.services.case_service import (
     get_case_tree,
     list_case_sets,
     list_node_versions,
+    publish_case_set,
     rollback_node,
     update_case_node,
 )
@@ -63,6 +64,15 @@ def api_delete_case_set(
     current_user: User = Depends(get_current_active_user),
 ):
     return delete_case_set(db, case_set_id, current_user.user_id)
+
+
+@router.post("/case-sets/{case_set_id}/publish", response_model=CaseSetOut)
+def api_publish_case_set(
+    case_set_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    return publish_case_set(db, case_set_id, current_user.user_id)
 
 
 @router.post("/case-nodes", response_model=CaseNodeOut)

@@ -12,6 +12,10 @@ export function deleteCaseSet(caseSetId, data) {
   return request.delete(`/api/case-sets/${caseSetId}`, { data })
 }
 
+export function publishCaseSet(caseSetId) {
+  return request.post(`/api/case-sets/${caseSetId}/publish`)
+}
+
 export function getCaseTree(caseSetId) {
   return request.get(`/api/case-sets/${caseSetId}/tree`)
 }

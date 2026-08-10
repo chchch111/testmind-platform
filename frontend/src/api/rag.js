@@ -26,6 +26,14 @@ export function importCaseSetAsSource(knowledgeBaseId, caseSetId) {
   })
 }
 
+export function listKnowledgeSources(knowledgeBaseId) {
+  return request.get(`/api/rag/knowledge-bases/${knowledgeBaseId}/sources`)
+}
+
+export function deleteKnowledgeSource(sourceId) {
+  return request.delete(`/api/rag/sources/${sourceId}`)
+}
+
 export function buildIndex(knowledgeBaseId) {
   return request.post(`/api/rag/knowledge-bases/${knowledgeBaseId}/build-index`)
 }

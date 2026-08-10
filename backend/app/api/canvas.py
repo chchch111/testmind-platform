@@ -9,6 +9,7 @@ from app.schemas.canvas import (
     CaseSetMetaSaveRequest,
     ReviewCreate,
     ReviewOut,
+    ReviewUpdate,
     SnapshotCreate,
     SnapshotOut,
 )
@@ -20,6 +21,7 @@ from app.services.canvas_service import (
     list_reviews,
     list_snapshots,
     replace_node_metas,
+    update_review,
 )
 
 router = APIRouter(prefix="/api/case-sets", tags=["脑图数据"])
@@ -81,3 +83,14 @@ def api_create_review(
 @router.get("/{case_set_id}/reviews", response_model=list[ReviewOut])
 def api_list_reviews(case_set_id: int, db: Session = Depends(get_db)):
     return list_reviews(db, case_set_id)
+
+
+@router.patch("/{case_set_id}/reviews/{review_id}", response_model=ReviewOut)
+def api_update_review(
+    case_set_id: int,
+    review_id: int,
+    data: ReviewUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    return update_review(db, review_id, data, current_user.user_id)

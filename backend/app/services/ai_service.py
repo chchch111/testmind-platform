@@ -240,9 +240,9 @@ def parse_generated_json(generated_text: str) -> dict:
 def save_generated_case_set(db: Session, generated_json: dict, created_by: int) -> int:
     case_set = TestCaseSet(
         name=str(generated_json["case_set_name"])[:200],
-        description="由AI基于RAG知识库自动生成",
+        description="由AI基于RAG知识库自动生成，待人工审阅后发布",
         source_type="ai_generated",
-        status="active",
+        status="draft",
         created_by=created_by,
     )
     db.add(case_set)

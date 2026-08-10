@@ -20,6 +20,8 @@ class CaseSetOut(BaseModel):
     updated_by: int | None
     created_at: datetime
     updated_at: datetime
+    generation_id: int | None = None
+    requirement_text: str | None = None
 
     model_config = {"from_attributes": True}
 

@@ -40,5 +40,7 @@ class CaseSetReview(Base):
     due_at: Mapped[DateTime | None] = mapped_column(DateTime)
     note: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="submitted")
+    conclusion: Mapped[str | None] = mapped_column(Text)
     created_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.user_id"), nullable=False)
     created_at: Mapped[DateTime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    updated_at: Mapped[DateTime] = mapped_column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())

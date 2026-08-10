@@ -273,7 +273,7 @@ async function handleGenerate() {
     result.value = data
     activeStage.value = stages.length
     currentStageText.value = '生成完成，结果已返回前端'
-    showSuccess(data.case_set_id ? `AI生成成功，已保存为用例集 #${data.case_set_id}` : 'AI生成成功，结果已返回预览')
+    showSuccess(data.case_set_id ? `AI生成成功，已保存为草稿用例集 #${data.case_set_id}，可在用例集管理中审阅并发布` : 'AI生成成功，结果已返回预览')
     await loadRecords()
   } finally {
     stopStageProgress()

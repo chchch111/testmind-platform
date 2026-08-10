@@ -56,7 +56,13 @@ class ReviewOut(BaseModel):
     due_at: datetime | None
     note: str | None
     status: str
+    conclusion: str | None = None
     created_by: int
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class ReviewUpdate(BaseModel):
+    status: str | None = Field(default=None, pattern="^(submitted|reviewing|completed)$")
+    conclusion: str | None = None

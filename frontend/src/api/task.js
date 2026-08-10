@@ -16,6 +16,10 @@ export function listTaskExecutions(taskId) {
   return request.get(`/api/tasks/${taskId}/executions`)
 }
 
+export function getTaskReport(taskId) {
+  return request.get(`/api/tasks/${taskId}/report`)
+}
+
 export function getExecutorTasks(executorId) {
   return request.get(`/api/executors/${executorId}/tasks`)
 }
@@ -26,6 +30,10 @@ export function updateExecution(executionId, data) {
 
 export function cancelTask(taskId) {
   return request.post(`/api/tasks/${taskId}/cancel`)
+}
+
+export function assignTask(taskId) {
+  return request.post(`/api/tasks/${taskId}/assign`)
 }
 
 export function deleteTask(taskId) {

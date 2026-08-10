@@ -27,3 +27,7 @@ export function createReview(caseSetId, data) {
 export function listReviews(caseSetId) {
   return request.get(`/api/case-sets/${caseSetId}/reviews`)
 }
+
+export function updateReview(caseSetId, reviewId, data) {
+  return request.patch(`/api/case-sets/${caseSetId}/reviews/${reviewId}`, data)
+}

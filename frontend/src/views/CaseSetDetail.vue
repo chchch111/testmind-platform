@@ -272,10 +272,17 @@
         <div class="review-history" v-if="caseReviewRecords.length">
           <div class="review-history-title">最近评审记录</div>
           <div v-for="record in caseReviewRecords" :key="record.review_id" class="review-history-item">
-            <strong>已发起评审</strong>
+            <div class="review-history-head">
+              <el-tag :type="reviewStatusTagType(record.status)" size="small">{{ reviewStatusText(record.status) }}</el-tag>
+              <div v-if="record.status !== 'completed'" class="review-actions">
+                <el-button v-if="record.status === 'submitted'" size="small" type="primary" @click="startReview(record)">开始评审</el-button>
+                <el-button size="small" type="success" @click="completeReview(record)">完成评审</el-button>
+              </div>
+            </div>
             <span>评审人：{{ (record.reviewer_ids || []).join('、') }}</span>
             <span>截止：{{ record.due_at || '未设置' }}</span>
             <small>{{ record.note || '无说明' }}</small>
+            <small v-if="record.conclusion" class="review-conclusion">结论：{{ record.conclusion }}</small>
           </div>
         </div>
       </div>
@@ -465,7 +472,7 @@ import { ElMessageBox } from 'element-plus'
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { createCaseNode, deleteCaseNode, getCaseTree, updateCaseNode } from '../api/case'
-import { createReview, createSnapshot, deleteSnapshot, getCaseSetMetas, listReviews, listSnapshots, saveCaseSetMetas } from '../api/canvas'
+import { createReview, createSnapshot, deleteSnapshot, getCaseSetMetas, listReviews, listSnapshots, saveCaseSetMetas, updateReview } from '../api/canvas'
 import CaseNodeForm from '../components/CaseNodeForm.vue'
 import MindMapCanvas from '../components/MindMapCanvas.vue'
 import VersionDrawer from '../components/VersionDrawer.vue'
@@ -1232,6 +1239,37 @@ async function submitCaseReview() {
   caseReviewRecords.value = await listReviews(caseSetId)
   caseReviewDialogVisible.value = false
   showSuccess(`已发起用例集评审，评审人 ${reviewerIds.join('、')}`)
+}
+
+async function startReview(record) {
+  await updateReview(caseSetId, record.review_id, { status: 'reviewing' })
+  showSuccess('已开始评审')
+  caseReviewRecords.value = await listReviews(caseSetId)
+}
+
+async function completeReview(record) {
+  const result = await ElMessageBox.prompt('请输入评审结论', '完成评审', {
+    confirmButtonText: '确认完成',
+    cancelButtonText: '取消',
+    inputPlaceholder: '例如：用例覆盖完整，建议补充异常分支'
+  }).catch(() => null)
+  if (!result) {
+    return
+  }
+  await updateReview(caseSetId, record.review_id, { status: 'completed', conclusion: String(result.value || '').trim() || null })
+  showSuccess('评审已完成')
+  caseReviewRecords.value = await listReviews(caseSetId)
+}
+
+function reviewStatusText(status) {
+  const map = { submitted: '待评审', reviewing: '评审中', completed: '已完成' }
+  return map[status] || status
+}
+
+function reviewStatusTagType(status) {
+  if (status === 'completed') return 'success'
+  if (status === 'reviewing') return 'warning'
+  return 'info'
 }
 
 async function createCanvasSnapshot() {
@@ -2882,18 +2920,34 @@ onBeforeUnmount(() => {
 }
 
 .review-history-item {
-  display: grid;
-  grid-template-columns: 110px 1fr 180px;
-  gap: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   padding: 10px;
   border: 1px solid #dbeafe;
   border-radius: 8px;
   background: #f8fafc;
 }
 
+.review-history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.review-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .review-history-item small {
-  grid-column: 1 / -1;
   color: #64748b;
+}
+
+.review-conclusion {
+  font-weight: 700;
+  color: #166534 !important;
 }
 
 .automation-tools {

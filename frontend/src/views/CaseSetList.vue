@@ -28,15 +28,22 @@
       <el-table-column label="来源" width="120">
         <template #default="{ row }">{{ SOURCE_TYPE_TEXT[row.source_type] || row.source_type }}</template>
       </el-table-column>
+      <el-table-column label="AI生成需求" min-width="200" show-overflow-tooltip>
+        <template #default="{ row }">
+          <span v-if="row.requirement_text" class="req-text">{{ row.requirement_text }}</span>
+          <span v-else class="req-empty">-</span>
+        </template>
+      </el-table-column>
       <el-table-column label="状态" width="100">
         <template #default="{ row }">{{ STATUS_TEXT[row.status] || row.status }}</template>
       </el-table-column>
       <el-table-column label="创建时间" width="190">
         <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="360" fixed="right">
+      <el-table-column label="操作" width="430" fixed="right">
         <template #default="{ row }">
           <el-button size="small" type="primary" @click="$router.push(`/case-sets/${row.case_set_id}`)">查看树</el-button>
+          <el-button v-if="row.status === 'draft'" size="small" type="success" @click="handlePublish(row)">发布</el-button>
           <el-button size="small" type="success" :loading="exportingId === row.case_set_id" @click="handleExport(row)">导出XMind</el-button>
           <el-button size="small" type="danger" @click="handleDelete(row)">删除</el-button>
         </template>
@@ -72,7 +79,7 @@
 <script setup>
 import { ElMessageBox } from 'element-plus'
 import { onMounted, reactive, ref, watch } from 'vue'
-import { createCaseSet, deleteCaseSet, listCaseSets } from '../api/case'
+import { createCaseSet, deleteCaseSet, listCaseSets, publishCaseSet } from '../api/case'
 import { getCaseSetMetas } from '../api/canvas'
 import { exportXmind, importXmind } from '../api/xmind'
 import { SOURCE_TYPE_TEXT, STATUS_TEXT } from '../utils/constants'
@@ -153,6 +160,13 @@ async function handleDelete(row) {
   await confirmAction(`确认删除用例集「${row.name}」吗？该操作会逻辑删除其下节点。`)
   await deleteCaseSet(row.case_set_id)
   showSuccess('用例集删除成功')
+  await loadCaseSets()
+}
+
+async function handlePublish(row) {
+  await confirmAction(`确认发布用例集「${row.name}」吗？发布后其他用户可以查看和使用它。`, '发布用例集')
+  await publishCaseSet(row.case_set_id)
+  showSuccess('用例集已发布')
   await loadCaseSets()
 }
 
@@ -262,6 +276,14 @@ onMounted(loadCaseSets)
 .filter-count {
   color: #64748b;
   font-size: 13px;
+}
+
+.req-text {
+  color: #475569;
+}
+
+.req-empty {
+  color: #94a3b8;
 }
 
 .pager {

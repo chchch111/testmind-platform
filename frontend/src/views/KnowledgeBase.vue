@@ -136,6 +136,34 @@
       </el-table>
     </div>
 
+    <div class="page-card" v-if="selectedKnowledgeBase">
+      <div class="source-header">
+        <div>
+          <h2>知识来源列表</h2>
+          <p class="section-desc">当前知识库的全部知识来源，删除后需重新构建索引才会生效。</p>
+        </div>
+        <el-button :loading="sourcesLoading" @click="loadSources">刷新</el-button>
+      </div>
+      <el-table v-loading="sourcesLoading" :data="knowledgeSources" border>
+        <el-table-column prop="source_id" label="ID" width="80" />
+        <el-table-column prop="source_name" label="来源名称" min-width="220" show-overflow-tooltip />
+        <el-table-column label="类型" width="150">
+          <template #default="{ row }">{{ SOURCE_TYPE_TEXT[row.source_type] || row.source_type }}</template>
+        </el-table-column>
+        <el-table-column label="状态" width="100">
+          <template #default="{ row }">{{ STATUS_TEXT[row.status] || row.status }}</template>
+        </el-table-column>
+        <el-table-column label="创建时间" width="190">
+          <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="120" fixed="right">
+          <template #default="{ row }">
+            <el-button size="small" type="danger" @click="handleDeleteSource(row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </div>
+
     <el-dialog v-model="chunkDialogVisible" title="命中知识片段详情" width="720px">
       <div v-if="activeChunk" class="chunk-detail-body">
         <el-descriptions :column="2" border>
@@ -184,11 +212,11 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { addManualSource, buildIndex, createKnowledgeBase, importCaseSetAsSource, listKnowledgeBases, searchKnowledgeBase, uploadKnowledgeSourceFile } from '../api/rag'
+import { addManualSource, buildIndex, createKnowledgeBase, deleteKnowledgeSource, importCaseSetAsSource, listKnowledgeBases, listKnowledgeSources, searchKnowledgeBase, uploadKnowledgeSourceFile } from '../api/rag'
 import { listCaseSets } from '../api/case'
-import { STATUS_TEXT } from '../utils/constants'
+import { SOURCE_TYPE_TEXT, STATUS_TEXT } from '../utils/constants'
 import { formatDateTime } from '../utils/format'
-import { showSuccess, showWarning } from '../utils/message'
+import { confirmAction, showSuccess, showWarning } from '../utils/message'
 import { getCurrentUserId } from '../utils/storage'
 
 const loading = ref(false)
@@ -206,6 +234,8 @@ const activeChunk = ref(null)
 const buildResult = ref(null)
 const buildStageText = ref('准备构建索引...')
 const searchResult = ref([])
+const knowledgeSources = ref([])
+const sourcesLoading = ref(false)
 const sourceTab = ref('manual')
 const fileInputRef = ref(null)
 const selectedFile = ref(null)
@@ -294,7 +324,29 @@ function handleSelectKnowledgeBase(row) {
     selectedKnowledgeBase.value = row
     buildResult.value = null
     searchResult.value = []
+    loadSources()
   }
+}
+
+async function loadSources() {
+  if (!selectedKnowledgeBase.value) {
+    return
+  }
+  sourcesLoading.value = true
+  try {
+    knowledgeSources.value = await listKnowledgeSources(selectedKnowledgeBase.value.knowledge_base_id)
+  } catch {
+    knowledgeSources.value = []
+  } finally {
+    sourcesLoading.value = false
+  }
+}
+
+async function handleDeleteSource(row) {
+  await confirmAction(`确认删除知识来源「${row.source_name}」吗？删除后需要重新构建索引。`, '删除知识来源')
+  await deleteKnowledgeSource(row.source_id)
+  showSuccess('知识来源已删除')
+  await loadSources()
 }
 
 async function selectAndScroll(row) {
@@ -320,6 +372,7 @@ async function handleAddSource() {
       created_by: getCurrentUserId()
     })
     showSuccess('知识资料保存成功，请继续构建索引')
+    await loadSources()
     sourceForm.source_name = ''
     sourceForm.content_text = ''
   } finally {
@@ -340,6 +393,7 @@ async function handleUploadSource() {
   try {
     const result = await uploadKnowledgeSourceFile(selectedKnowledgeBase.value.knowledge_base_id, selectedFile.value)
     showSuccess(`文件解析成功：${result.source_name}，请继续构建索引`)
+    await loadSources()
     selectedFile.value = null
     if (fileInputRef.value) {
       fileInputRef.value.value = ''
@@ -351,7 +405,7 @@ async function handleUploadSource() {
 
 async function loadCaseSets() {
   try {
-    const result = await listCaseSets({ page: 1, page_size: 100 })
+    const result = await listCaseSets({ page: 1, page_size: 100, status: 'active' })
     caseSets.value = result.items || []
   } catch {
     caseSets.value = []
@@ -366,6 +420,7 @@ async function handleImportCaseSet() {
   try {
     const result = await importCaseSetAsSource(selectedKnowledgeBase.value.knowledge_base_id, importCaseSetId.value)
     showSuccess(`用例集已导入为知识来源：${result.source_name}，请继续构建索引`)
+    await loadSources()
     importCaseSetId.value = null
   } finally {
     importingSource.value = false
@@ -476,6 +531,18 @@ onBeforeUnmount(stopBuildStageText)
 
 .build-button {
   margin-top: 14px;
+}
+
+.source-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.source-header h2 {
+  margin: 0 0 6px;
 }
 
 .wide-select {

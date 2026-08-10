@@ -6,11 +6,13 @@ from app.db.deps import get_db
 from app.models.user import User
 from app.schemas.task import ExecutionOut, ExecutionUpdate, ExecutorTaskOut, TaskCreate, TaskDetailOut, TaskPageOut
 from app.services.task_service import (
+    assign_task,
     cancel_task,
     create_task,
     delete_task,
     get_executor_tasks,
     get_task_detail,
+    get_task_report,
     list_task_executions,
     list_tasks,
     update_execution,
@@ -55,6 +57,15 @@ def api_cancel_task(
     return cancel_task(db, task_id, current_user.user_id)
 
 
+@router.post("/tasks/{task_id}/assign")
+def api_assign_task(
+    task_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    return assign_task(db, task_id, current_user.user_id)
+
+
 @router.delete("/tasks/{task_id}")
 def api_delete_task(
     task_id: int,
@@ -67,6 +78,11 @@ def api_delete_task(
 @router.get("/tasks/{task_id}/executions", response_model=list[ExecutionOut])
 def api_list_task_executions(task_id: int, db: Session = Depends(get_db)):
     return list_task_executions(db, task_id)
+
+
+@router.get("/tasks/{task_id}/report")
+def api_get_task_report(task_id: int, db: Session = Depends(get_db)):
+    return get_task_report(db, task_id)
 
 
 @router.get("/executors/{executor_id}/tasks", response_model=list[ExecutorTaskOut])

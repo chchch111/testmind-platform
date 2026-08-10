@@ -63,6 +63,30 @@ def add_manual_source(db: Session, knowledge_base_id: int, data: ManualSourceCre
     return source
 
 
+def list_knowledge_sources(db: Session, knowledge_base_id: int) -> list[KnowledgeSource]:
+    get_active_knowledge_base(db, knowledge_base_id)
+    statement = (
+        select(KnowledgeSource)
+        .where(
+            KnowledgeSource.knowledge_base_id == knowledge_base_id,
+            KnowledgeSource.is_deleted == 0,
+        )
+        .order_by(KnowledgeSource.source_id.asc())
+    )
+    return list(db.scalars(statement).all())
+
+
+def delete_knowledge_source(db: Session, source_id: int, operator_id: int) -> dict:
+    ensure_user_exists(db, operator_id)
+    source = db.get(KnowledgeSource, source_id)
+    if not source or source.is_deleted == 1:
+        raise HTTPException(status_code=404, detail="知识来源不存在")
+    source.is_deleted = 1
+    source.status = "disabled"
+    db.commit()
+    return {"message": "知识来源已删除", "source_id": source_id}
+
+
 def upload_knowledge_source_file(db: Session, knowledge_base_id: int, file: UploadFile, created_by: int) -> KnowledgeSource:
     """上传 txt/md/xmind 文件作为知识来源，抽取纯文本后保存。"""
     ensure_user_exists(db, created_by)

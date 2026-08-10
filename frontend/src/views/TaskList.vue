@@ -180,7 +180,7 @@ watch(page, () => {
 })
 
 async function loadCaseSets() {
-  const result = await listCaseSets({ page: 1, page_size: 100 })
+  const result = await listCaseSets({ page: 1, page_size: 100, status: 'active' })
   caseSets.value = result.items || []
 }
 

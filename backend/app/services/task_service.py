@@ -67,6 +67,7 @@ def create_task(db: Session, data: TaskCreate) -> dict:
                     execution_status="not_run",
                     sync_status="synced",
                     sync_version=1,
+                    case_node_snapshot=build_node_snapshot(node),
                 )
             )
 
@@ -145,11 +146,76 @@ def get_task_detail(db: Session, task_id: int) -> dict:
     }
 
 
-def list_task_executions(db: Session, task_id: int) -> list[dict]:
+def get_task_report(db: Session, task_id: int) -> dict:
+    """生成任务测试报告：总体通过率、按执行人统计、缺陷清单。"""
     task = db.get(TestTask, task_id)
     if not task or task.is_deleted == 1:
         raise HTTPException(status_code=404, detail="测试任务不存在")
 
+    executions = list(
+        db.scalars(
+            select(TestExecutionRecord)
+            .where(TestExecutionRecord.task_id == task_id)
+            .order_by(TestExecutionRecord.executor_id.asc(), TestExecutionRecord.execution_id.asc())
+        ).all()
+    )
+    enriched = enrich_executions(db, executions)
+
+    total = len(executions)
+    passed = sum(1 for item in enriched if item["execution_status"] == "passed")
+    failed = sum(1 for item in enriched if item["execution_status"] == "failed")
+    blocked = sum(1 for item in enriched if item["execution_status"] == "blocked")
+    skipped = sum(1 for item in enriched if item["execution_status"] == "skipped")
+    not_run = sum(1 for item in enriched if item["execution_status"] == "not_run")
+
+    # 按执行人统计
+    per_executor: dict[int, dict] = {}
+    for item in enriched:
+        executor_id = item["executor_id"]
+        stats = per_executor.setdefault(
+            executor_id,
+            {"executor_id": executor_id, "total": 0, "passed": 0, "failed": 0, "blocked": 0, "skipped": 0, "not_run": 0},
+        )
+        stats["total"] += 1
+        stats[item["execution_status"]] += 1
+
+    # 缺陷清单：failed/blocked 且有关键信息的记录
+    defects = [
+        {
+            "execution_id": item["execution_id"],
+            "case_node_id": item["case_node_id"],
+            "case_node_title": item["case_node_title"],
+            "case_node_priority": item["case_node_priority"],
+            "executor_id": item["executor_id"],
+            "execution_status": item["execution_status"],
+            "actual_result": item["actual_result"],
+            "bug_description": item["bug_description"],
+            "executed_at": item["executed_at"],
+        }
+        for item in enriched
+        if item["execution_status"] in {"failed", "blocked"}
+    ]
+
+    return {
+        "task_id": task_id,
+        "task_name": task.task_name,
+        "task_status": task.status,
+        "total": total,
+        "passed": passed,
+        "failed": failed,
+        "blocked": blocked,
+        "skipped": skipped,
+        "not_run": not_run,
+        "pass_rate": round(passed / total, 4) if total else 0.0,
+        "per_executor": list(per_executor.values()),
+        "defects": defects,
+    }
+
+
+def list_task_executions(db: Session, task_id: int) -> list[dict]:
+    task = db.get(TestTask, task_id)
+    if not task or task.is_deleted == 1:
+        raise HTTPException(status_code=404, detail="测试任务不存在")
     statement = (
         select(TestExecutionRecord)
         .where(TestExecutionRecord.task_id == task_id)
@@ -189,9 +255,23 @@ def get_executor_tasks(db: Session, executor_id: int) -> list[dict]:
     for item in all_enriched:
         enriched_by_task.setdefault(item["task_id"], []).append(item)
 
+    assignees = list(
+        db.scalars(
+            select(TestTaskAssignee).where(
+                TestTaskAssignee.task_id.in_(active_task_ids),
+                TestTaskAssignee.assignee_id == executor_id,
+            )
+        ).all()
+    )
+    assign_status_map = {assignee.task_id: assignee.assign_status for assignee in assignees}
+
     result = []
     for task in tasks:
-        result.append({"task": task, "executions": enriched_by_task.get(task.task_id, [])})
+        result.append({
+            "task": task,
+            "assign_status": assign_status_map.get(task.task_id, "assigned"),
+            "executions": enriched_by_task.get(task.task_id, []),
+        })
     return result
 
 
@@ -207,6 +287,16 @@ def update_execution(db: Session, execution_id: int, data: ExecutionUpdate) -> T
 
     if execution.executor_id != data.executor_id:
         raise HTTPException(status_code=403, detail="只能更新分配给自己的执行记录")
+
+    # 执行人需先认领任务才能提交执行结果。
+    assignee = db.scalar(
+        select(TestTaskAssignee).where(
+            TestTaskAssignee.task_id == execution.task_id,
+            TestTaskAssignee.assignee_id == execution.executor_id,
+        )
+    )
+    if not assignee or assignee.assign_status != "accepted":
+        raise HTTPException(status_code=403, detail="请先认领任务，再提交执行结果")
 
     if data.sync_version != execution.sync_version:
         execution.sync_status = "conflict"
@@ -265,6 +355,42 @@ def delete_task(db: Session, task_id: int, operator_id: int) -> dict:
     return {"message": "测试任务已删除", "task_id": task_id}
 
 
+def build_node_snapshot(node: TestCaseNode) -> dict:
+    """任务下发时固化用例节点内容，避免后续编辑影响执行人看到的内容。"""
+    return {
+        "title": node.title,
+        "node_type": node.node_type,
+        "precondition": node.precondition,
+        "test_steps": node.test_steps,
+        "expected_result": node.expected_result,
+        "priority": node.priority,
+    }
+
+
+def assign_task(db: Session, task_id: int, executor_id: int) -> dict:
+    """执行人认领任务。认领后 assign_status 从 assigned 变为 accepted。"""
+    ensure_user_exists(db, executor_id)
+    task = db.get(TestTask, task_id)
+    if not task or task.is_deleted == 1:
+        raise HTTPException(status_code=404, detail="测试任务不存在")
+
+    assignee = db.scalar(
+        select(TestTaskAssignee).where(
+            TestTaskAssignee.task_id == task_id,
+            TestTaskAssignee.assignee_id == executor_id,
+        )
+    )
+    if not assignee:
+        raise HTTPException(status_code=403, detail="你不是该任务的执行人，不能认领")
+
+    assignee.assign_status = "accepted"
+    assignee.assigned_at = func.now()
+    if task.status == "assigned":
+        task.status = "running"
+    db.commit()
+    return {"message": "任务已认领", "task_id": task_id, "assign_status": "accepted"}
+
+
 def count_execution_status(db: Session, task_id: int, status: str) -> int:
     return db.scalar(
         select(func.count()).select_from(TestExecutionRecord).where(
@@ -287,12 +413,14 @@ def enrich_executions(db: Session, executions: list[TestExecutionRecord]) -> lis
 
     result = []
     for execution in executions:
+        snapshot = execution.case_node_snapshot or {}
+        node = node_map.get(execution.case_node_id)
         item = {
             "execution_id": execution.execution_id,
             "task_id": execution.task_id,
             "case_node_id": execution.case_node_id,
-            "case_node_title": node_map.get(execution.case_node_id) and node_map[execution.case_node_id].title,
-            "case_node_priority": node_map.get(execution.case_node_id) and node_map[execution.case_node_id].priority,
+            "case_node_title": snapshot.get("title") or (node.title if node else None),
+            "case_node_priority": snapshot.get("priority") or (node.priority if node else None),
             "executor_id": execution.executor_id,
             "execution_status": execution.execution_status,
             "actual_result": execution.actual_result,
@@ -303,6 +431,7 @@ def enrich_executions(db: Session, executions: list[TestExecutionRecord]) -> lis
             "synced_at": execution.synced_at,
             "created_at": execution.created_at,
             "updated_at": execution.updated_at,
+            "case_node_snapshot": snapshot or None,
         }
         result.append(item)
     return result
