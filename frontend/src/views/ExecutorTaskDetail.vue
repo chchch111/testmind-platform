@@ -37,6 +37,8 @@
         @zoom-in="zoomIn"
         @zoom-out="zoomOut"
         @reset-view="resetZoom"
+        @box-select="handleBoxSelect"
+        @box-select-preview="handleBoxSelect"
       />
 
       <div v-if="!treeData.length" class="empty-tip">该任务还没有可执行的用例</div>
@@ -53,6 +55,7 @@
 </template>
 
 <script setup>
+import { ElMessageBox } from 'element-plus'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { assignTask, getSubtaskExecutionTree, listTaskExecutions, updateExecution } from '../api/task'
@@ -143,9 +146,17 @@ function handleSelect(node) {
   selectedNodeIds.value = [node.node_id]
 }
 
+function handleBoxSelect(nodeIds) {
+  selectedNodeIds.value = nodeIds
+  selectedNodeId.value = nodeIds.length ? nodeIds[0] : null
+}
+
 function openContextMenu(payload) {
   const node = payload.node
-  handleSelect(node)
+  // 右击节点：若已被框选则保持多选，否则单选
+  if (!selectedNodeIds.value.includes(node.node_id)) {
+    handleSelect(node)
+  }
   // 只有 case 节点可以标记执行状态
   if (node.node_type !== 'case') {
     showWarning('目录节点不能标记执行状态')
@@ -165,35 +176,124 @@ async function handleAssignTask() {
 
 async function handleRadialAction(action) {
   radialVisible.value = false
-  if (action === 'remove' || action === 'note' || action === 'bug') {
-    return
-  }
   if (!isClaimed.value) {
     showWarning('请先认领任务')
     return
   }
-  const nodeId = selectedNodeId.value
-  const execution = nodeToExecution.value[nodeId]
-  if (!execution) {
+  const targetNodeIds = selectedNodeIds.value.length ? selectedNodeIds.value : [selectedNodeId.value]
+  const caseNodeIds = targetNodeIds.filter(id => nodeToExecution.value[id])
+  if (!caseNodeIds.length) {
     showWarning('未找到对应的执行记录')
     return
   }
-  try {
-    await updateExecution(execution.execution_id, {
-      executor_id: execution.executor_id,
-      execution_status: action,
-      actual_result: defaultActualResult(action),
-      bug_description: action === 'failed' ? '执行失败，实际结果不符合预期。' : null,
-      sync_version: execution.sync_version
-    })
-    // 局部更新 statusMap，不整页重载
-    statusMap.value = { ...statusMap.value, [nodeId]: action }
-    execution.sync_version += 1
-    showSuccess(`已标记为：${statusText(action)}`)
-    refreshCounts()
-  } catch {
-    // 全局拦截器已提示
+
+  if (action === 'remove') {
+    await markStatus(caseNodeIds, 'not_run')
+    return
   }
+  if (action === 'bug') {
+    await addBug(caseNodeIds)
+    return
+  }
+  if (action === 'note') {
+    await addNote(caseNodeIds)
+    return
+  }
+  // passed / failed / blocked / skipped
+  await markStatus(caseNodeIds, action)
+}
+
+async function markStatus(caseNodeIds, status) {
+  let successCount = 0
+  const nextStatusMap = { ...statusMap.value }
+  for (const nodeId of caseNodeIds) {
+    const execution = nodeToExecution.value[nodeId]
+    try {
+      await updateExecution(execution.execution_id, {
+        executor_id: execution.executor_id,
+        execution_status: status,
+        actual_result: defaultActualResult(status),
+        bug_description: null,
+        sync_version: execution.sync_version
+      })
+      nextStatusMap[nodeId] = status
+      execution.sync_version += 1
+      successCount += 1
+    } catch {
+      // 单条失败继续处理下一条
+    }
+  }
+  statusMap.value = nextStatusMap
+  showSuccess(`已标记 ${successCount} 个节点为：${statusText(status)}`)
+  refreshCounts()
+}
+
+async function addBug(caseNodeIds) {
+  const result = await ElMessageBox.prompt('请输入缺陷描述', '登记缺陷', {
+    confirmButtonText: '提交',
+    cancelButtonText: '取消',
+    inputPlaceholder: '例如：红外灯在低照度下未自动开启',
+    inputType: 'textarea'
+  }).catch(() => null)
+  if (!result) {
+    return
+  }
+  const bugDescription = String(result.value || '').trim()
+  let successCount = 0
+  const nextStatusMap = { ...statusMap.value }
+  for (const nodeId of caseNodeIds) {
+    const execution = nodeToExecution.value[nodeId]
+    try {
+      await updateExecution(execution.execution_id, {
+        executor_id: execution.executor_id,
+        execution_status: 'failed',
+        actual_result: defaultActualResult('failed'),
+        bug_description: bugDescription,
+        sync_version: execution.sync_version
+      })
+      nextStatusMap[nodeId] = 'failed'
+      execution.sync_version += 1
+      successCount += 1
+    } catch {
+      // 单条失败继续处理下一条
+    }
+  }
+  statusMap.value = nextStatusMap
+  showSuccess(`已登记缺陷 ${successCount} 个节点`)
+  refreshCounts()
+}
+
+async function addNote(caseNodeIds) {
+  const result = await ElMessageBox.prompt('请输入执行备注', '填写备注', {
+    confirmButtonText: '保存',
+    cancelButtonText: '取消',
+    inputPlaceholder: '例如：需要在 8 小时老化后复测',
+    inputType: 'textarea'
+  }).catch(() => null)
+  if (!result) {
+    return
+  }
+  const note = String(result.value || '').trim()
+  let successCount = 0
+  const nextStatusMap = { ...statusMap.value }
+  for (const nodeId of caseNodeIds) {
+    const execution = nodeToExecution.value[nodeId]
+    try {
+      await updateExecution(execution.execution_id, {
+        executor_id: execution.executor_id,
+        execution_status: execution.execution_status,
+        actual_result: note,
+        bug_description: execution.bug_description,
+        sync_version: execution.sync_version
+      })
+      execution.sync_version += 1
+      successCount += 1
+    } catch {
+      // 单条失败继续处理下一条
+    }
+  }
+  statusMap.value = nextStatusMap
+  showSuccess(`已保存备注 ${successCount} 个节点`)
 }
 
 function refreshCounts() {

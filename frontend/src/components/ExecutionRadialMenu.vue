@@ -1,13 +1,58 @@
 <template>
-  <div v-if="visible" class="radial-mask" @click.self="$emit('close')">
-    <div class="radial-menu" :style="menuStyle">
-      <button class="action action-top-left" @click="emitAction('remove')">移除<span>Del</span></button>
-      <button class="action action-top-right" @click="emitAction('bug')">缺陷<span>缺陷</span></button>
-      <button class="action action-left" @click="emitAction('blocked')">阻塞<span>阻塞</span></button>
-      <button class="action action-right" @click="emitAction('failed')">失败<span>失败</span></button>
-      <button class="action action-bottom" @click="emitAction('note')">备注<span>备注</span></button>
-      <button class="action action-center" @click="emitAction('passed')">通过<span>通过</span></button>
-      <button class="action action-skip" @click="emitAction('skipped')">不适用<span>不适用</span></button>
+  <div v-if="visible" class="status-mask" @mousedown.self="$emit('close')" @contextmenu.prevent.self="$emit('close')">
+    <div class="status-dial" :style="menuStyle" @click.stop>
+      <!-- 闭合灰色环形轨道 -->
+      <svg class="track-arc" viewBox="0 0 290 360" aria-hidden="true">
+        <circle
+          cx="145" cy="165" r="78"
+          fill="none"
+          stroke="rgba(71, 85, 105, 0.22)"
+          stroke-width="20"
+        />
+      </svg>
+
+      <!-- 顶部左胶囊：移除 (Del) -->
+      <button class="tag-capsule tag-remove" @click="emitAction('remove')">
+        <span class="tag-main">移除</span>
+        <span class="tag-note">(Del)</span>
+      </button>
+
+      <!-- 顶部右胶囊：缺陷 (缺陷) -->
+      <button class="tag-capsule tag-bug" @click="emitAction('bug')">
+        <span class="tag-main">缺陷</span>
+        <span class="tag-note">(缺陷)</span>
+      </button>
+
+      <!-- 环形正上方：红色主状态「通过」（覆盖在环上） -->
+      <button class="ring-node ring-passed" @click="emitAction('passed')">
+        <span class="ring-main">通过</span>
+        <span class="ring-sub">通过</span>
+      </button>
+
+      <!-- 环形左侧：白色「阻塞」 -->
+      <button class="ring-node ring-blocked" @click="emitAction('blocked')">
+        <span class="ring-main">阻塞</span>
+        <span class="ring-sub">阻塞</span>
+      </button>
+
+      <!-- 环形右侧：白色「失败」 -->
+      <button class="ring-node ring-failed" @click="emitAction('failed')">
+        <span class="ring-main">失败</span>
+        <span class="ring-sub">失败</span>
+      </button>
+
+      <!-- 环形正下方：白色「不适用」 -->
+      <button class="ring-node ring-skipped" @click="emitAction('skipped')">
+        <span class="ring-main">不适用</span>
+        <span class="ring-sub">不适用</span>
+      </button>
+
+      <!-- 底部居中胶囊：备注 (备注) -->
+      <button class="tag-capsule tag-note" @click="emitAction('note')">
+        <span class="tag-icon">✎</span>
+        <span class="tag-main">备注</span>
+        <span class="tag-note">(备注)</span>
+      </button>
     </div>
   </div>
 </template>
@@ -22,20 +67,28 @@ const props = defineProps({
   },
   x: {
     type: Number,
-    default: 500
+    default: 0
   },
   y: {
     type: Number,
-    default: 300
+    default: 0
   }
 })
 
 const emit = defineEmits(['close', 'action'])
 
-const menuStyle = computed(() => ({
-  left: `${props.x}px`,
-  top: `${props.y}px`
-}))
+const MENU_WIDTH = 290
+const MENU_HEIGHT = 360
+
+// 钳制在视口内，避免菜单跑到屏幕外点不到。
+const menuStyle = computed(() => {
+  const left = Math.max(8, Math.min(props.x - MENU_WIDTH / 2, window.innerWidth - MENU_WIDTH - 8))
+  const top = Math.max(8, Math.min(props.y - MENU_HEIGHT / 2, window.innerHeight - MENU_HEIGHT - 8))
+  return {
+    left: `${left}px`,
+    top: `${top}px`
+  }
+})
 
 function emitAction(action) {
   emit('action', action)
@@ -43,132 +96,150 @@ function emitAction(action) {
 </script>
 
 <style scoped>
-.radial-mask {
+.status-mask {
   position: fixed;
   inset: 0;
   z-index: 3000;
-  background: rgba(15, 23, 42, 0.08);
+  background: transparent;
 }
 
-.radial-menu {
+.status-dial {
   position: fixed;
-  width: 320px;
-  height: 260px;
-  transform: translate(-50%, -50%);
-  border: 6px solid rgba(239, 68, 68, 0.85);
-  background: rgba(255, 255, 255, 0.12);
-  box-shadow: 0 18px 60px rgba(15, 23, 42, 0.25);
+  width: 290px;
+  height: 360px;
+  pointer-events: none;
 }
 
-.radial-menu::before {
-  content: '';
+.track-arc {
   position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 170px;
-  height: 170px;
+  left: 0;
+  top: 0;
+  width: 290px;
+  height: 360px;
+  pointer-events: none;
+  filter: drop-shadow(0 8px 20px rgba(15, 23, 42, 0.08));
+}
+
+/* ---------- 环形状态节点（覆盖在轨道上） ---------- */
+.ring-node {
+  position: absolute;
+  width: 54px;
+  height: 54px;
+  border: 0;
   border-radius: 50%;
-  transform: translate(-50%, -50%);
-  background: conic-gradient(
-    rgba(148, 163, 184, 0.78),
-    rgba(71, 85, 105, 0.5),
-    rgba(148, 163, 184, 0.78),
-    rgba(71, 85, 105, 0.5),
-    rgba(148, 163, 184, 0.78)
-  );
-}
-
-.action {
-  position: absolute;
-  z-index: 2;
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.16);
+  cursor: pointer;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-width: 86px;
-  min-height: 52px;
-  border: 0;
-  border-radius: 16px;
-  background: #ffffff;
-  color: #334155;
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.16);
-  cursor: pointer;
-  font-size: 18px;
-  transition: 0.16s ease;
+  gap: 3px;
+  pointer-events: auto;
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
 }
 
-.action:hover {
-  transform: scale(1.06);
+.ring-node:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.22);
 }
 
-.action span {
-  margin-top: 3px;
-  color: #64748b;
-  font-size: 12px;
+.ring-main {
+  color: #111827;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
 }
 
-.action-center {
-  left: 50%;
-  top: 50%;
-  width: 84px;
-  height: 84px;
-  min-width: 84px;
-  min-height: 84px;
-  transform: translate(-50%, -50%);
-  border-radius: 50%;
+.ring-sub {
+  color: #9ca3af;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 1px;
+}
+
+/* 正上方：红色主状态（参考用例编辑强调色 #f05b67） */
+.ring-passed {
+  left: 116px;
+  top: 62px;
+  width: 58px;
+  height: 58px;
+  background: radial-gradient(circle at 35% 30%, #f87171, #f05b67);
+  box-shadow: 0 14px 32px rgba(240, 91, 103, 0.45), 0 4px 12px rgba(15, 23, 42, 0.2);
+}
+
+.ring-passed .ring-main {
   color: #ffffff;
-  background: #ef4444;
-  font-size: 24px;
+  font-size: 16px;
 }
 
-.action-center span {
-  color: #fff;
+.ring-passed .ring-sub {
+  color: rgba(255, 255, 255, 0.88);
 }
 
-.action-center:hover {
-  transform: translate(-50%, -50%) scale(1.06);
+/* 左侧：阻塞 */
+.ring-blocked {
+  left: 39px;
+  top: 138px;
 }
 
-.action-top-left {
-  left: 38px;
-  top: 20px;
+/* 右侧：失败 */
+.ring-failed {
+  left: 197px;
+  top: 138px;
 }
 
-.action-top-right {
-  right: 38px;
-  top: 20px;
+/* 正下方：不适用 */
+.ring-skipped {
+  left: 118px;
+  top: 216px;
 }
 
-.action-left {
-  left: 34px;
-  top: 112px;
+/* ---------- 外围胶囊标签 ---------- */
+.tag-capsule {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 38px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 999px;
+  background: #ffffff;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.14);
+  cursor: pointer;
+  pointer-events: auto;
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
 }
 
-.action-right {
-  right: 34px;
-  top: 112px;
+.tag-capsule:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.2);
 }
 
-.action-bottom {
-  left: 50%;
-  bottom: 14px;
-  transform: translateX(-50%);
+.tag-main {
+  color: #1f2937;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
 }
 
-.action-bottom:hover {
-  transform: translateX(-50%) scale(1.06);
+.tag-note {
+  color: #9ca3af;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
 }
 
-.action-skip {
-  left: 50%;
-  top: 150px;
-  min-width: 78px;
-  min-height: 56px;
-  border-radius: 50%;
-  transform: translateX(-50%);
+.tag-icon {
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1;
 }
 
-.action-skip:hover {
-  transform: translateX(-50%) scale(1.06);
-}
+.tag-remove { left: 12px; top: 10px; }
+.tag-bug { left: 188px; top: 10px; }
+.tag-note { left: 92px; top: 306px; }
 </style>
