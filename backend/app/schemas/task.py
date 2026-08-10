@@ -6,8 +6,10 @@ from pydantic import BaseModel, Field
 class TaskCreate(BaseModel):
     task_name: str = Field(min_length=1, max_length=200)
     description: str | None = None
-    case_set_ids: list[int] = Field(min_length=1)
-    assignee_ids: list[int] = Field(min_length=1)
+    parent_id: int | None = None
+    owner_id: int | None = None
+    case_set_ids: list[int] = Field(default_factory=list)
+    assignee_ids: list[int] = Field(default_factory=list)
     start_time: datetime | None = None
     end_time: datetime | None = None
     created_by: int = 1
@@ -15,7 +17,9 @@ class TaskCreate(BaseModel):
 
 class TaskOut(BaseModel):
     task_id: int
+    parent_id: int | None = None
     task_name: str
+    owner_id: int | None = None
     description: str | None
     status: str
     start_time: datetime | None
@@ -79,3 +83,56 @@ class ExecutorTaskOut(BaseModel):
     task: TaskOut
     assign_status: str | None = None
     executions: list[ExecutionOut]
+
+
+class SubtaskOut(TaskDetailOut):
+    parent_id: int | None = None
+    parent_name: str | None = None
+    owner_id: int | None = None
+    owner_name: str | None = None
+    assignee_names: list[str] = Field(default_factory=list)
+
+
+class TaskDirectoryOut(BaseModel):
+    task_id: int
+    task_name: str
+    description: str | None
+    status: str
+    owner_id: int | None = None
+    owner_name: str | None = None
+    created_by: int
+    created_at: datetime
+    updated_at: datetime
+    subtask_count: int = 0
+    total_cases: int = 0
+    tested_count: int = 0
+    passed_count: int = 0
+    pass_rate: float = 0.0
+
+
+class TaskDirectoryPageOut(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    items: list[TaskDirectoryOut]
+
+
+class SubtasksPageOut(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    items: list[SubtaskOut]
+
+
+class TaskTreeStatusOut(BaseModel):
+    task_id: int
+    task_name: str
+    parent_id: int | None = None
+    parent_name: str | None = None
+    assign_status: str | None = None
+    case_set_ids: list[int] = Field(default_factory=list)
+    tree: list[dict] = Field(default_factory=list)
+    status_map: dict[str, str] = Field(default_factory=dict)
+    total_cases: int = 0
+    tested_count: int = 0
+    passed_count: int = 0

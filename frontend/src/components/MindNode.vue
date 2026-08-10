@@ -34,6 +34,9 @@
         >{{ isCollapsed ? '+' : '−' }}</button>
         <span v-if="isCollapsed" class="collapsed-count">{{ children.length }}</span>
         <span v-if="node.node_type === 'case'" class="case-dot" />
+        <span v-if="nodeExecutionStatus" class="node-status-badge" :class="`status-${nodeExecutionStatus}`">
+          {{ EXECUTION_STATUS_SHORT[nodeExecutionStatus] || nodeExecutionStatus }}
+        </span>
         <button v-if="appearance.showMetaIcons !== false && nodeNote" class="node-note-icon" title="查看备注" @click.stop="handleNoteClick">注</button>
         <button v-if="appearance.showMetaIcons !== false && nodeLink" class="node-meta-icon link-icon" title="查看链接" @click.stop="handleLinkClick">链</button>
         <button v-if="appearance.showMetaIcons !== false && nodeImage" class="node-meta-icon image-icon" title="查看图片" @click.stop="handleImageClick">图</button>
@@ -59,6 +62,7 @@
             :node-links-map="nodeLinksMap"
             :node-images-map="nodeImagesMap"
             :node-reviews-map="nodeReviewsMap"
+            :node-execution-status-map="nodeExecutionStatusMap"
             :collapsed-node-ids="collapsedNodeIds"
             :appearance="appearance"
             @select="$emit('select', $event)"
@@ -83,6 +87,14 @@
 
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue'
+
+const EXECUTION_STATUS_SHORT = {
+  passed: '通过',
+  failed: '失败',
+  blocked: '阻塞',
+  skipped: '不适用',
+  not_run: '未执行'
+}
 
 const props = defineProps({
   node: {
@@ -125,6 +137,10 @@ const props = defineProps({
     type: Object,
     default: () => ({})
   },
+  nodeExecutionStatusMap: {
+    type: Object,
+    default: () => ({})
+  },
   collapsedNodeIds: {
     type: Array,
     default: () => []
@@ -151,6 +167,7 @@ const nodeNote = computed(() => String(props.nodeNotesMap[props.node.node_id] ||
 const nodeLink = computed(() => props.nodeLinksMap[props.node.node_id])
 const nodeImage = computed(() => props.nodeImagesMap[props.node.node_id])
 const nodeReview = computed(() => props.nodeReviewsMap[props.node.node_id])
+const nodeExecutionStatus = computed(() => props.nodeExecutionStatusMap[props.node.node_id] || '')
 const nodeClass = computed(() => ({
   'root-node': props.root,
   'case-node': props.node.node_type === 'case',
@@ -411,6 +428,49 @@ function cancelEdit() {
   border: 1px solid #94a3b8;
   border-radius: 50%;
   background: #fff;
+}
+
+.node-status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.node-status-badge.status-passed {
+  color: #166534;
+  background: #dcfce7;
+  border: 1px solid #4ade80;
+}
+
+.node-status-badge.status-failed {
+  color: #991b1b;
+  background: #fee2e2;
+  border: 1px solid #f87171;
+}
+
+.node-status-badge.status-blocked {
+  color: #92400e;
+  background: #ffedd5;
+  border: 1px solid #fb923c;
+}
+
+.node-status-badge.status-skipped {
+  color: #475569;
+  background: #e2e8f0;
+  border: 1px solid #94a3b8;
+}
+
+.node-status-badge.status-not_run {
+  color: #64748b;
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
 }
 
 .node-note-icon,

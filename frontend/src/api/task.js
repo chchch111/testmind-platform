@@ -24,6 +24,18 @@ export function getExecutorTasks(executorId) {
   return request.get(`/api/executors/${executorId}/tasks`)
 }
 
+export function listTaskDirectories(params = {}) {
+  return request.get('/api/tasks/directories', { params })
+}
+
+export function listSubtasks(parentId, params = {}) {
+  return request.get(`/api/tasks/${parentId}/subtasks`, { params })
+}
+
+export function getSubtaskExecutionTree(taskId) {
+  return request.get(`/api/tasks/${taskId}/execution-tree`)
+}
+
 export function updateExecution(executionId, data) {
   return request.put(`/api/executions/${executionId}`, data)
 }

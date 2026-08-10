@@ -4,90 +4,96 @@
       <div class="page-header-row">
         <div>
           <h1 class="page-title">测试任务管理</h1>
-          <p class="page-desc">创建测试任务、绑定用例集、分配执行人，并跟踪执行进度。</p>
+          <p class="page-desc">先创建任务目录，再在目录下添加子任务（绑定用例集、分配执行人）。</p>
         </div>
         <div class="header-actions">
-          <el-button type="primary" @click="openCreateDialog">创建测试任务</el-button>
-          <el-button @click="loadTasks">刷新</el-button>
+          <el-button type="primary" @click="openCreateDirDialog">创建目录</el-button>
+          <el-button @click="loadDirectories">刷新</el-button>
         </div>
       </div>
     </div>
 
-    <div class="summary-grid">
-      <div class="summary-card page-card">
-        <span>任务总数</span>
-        <strong>{{ total }}</strong>
-      </div>
-      <div class="summary-card page-card">
-        <span>本页执行中</span>
-        <strong>{{ countByStatus('running') }}</strong>
-      </div>
-      <div class="summary-card page-card">
-        <span>本页已分配</span>
-        <strong>{{ countByStatus('assigned') }}</strong>
-      </div>
-      <div class="summary-card page-card">
-        <span>本页已完成</span>
-        <strong>{{ countByStatus('finished') }}</strong>
+    <div class="page-card" v-loading="loading">
+      <div class="directory-list">
+        <template v-if="directories.length">
+          <div v-for="dir in directories" :key="dir.task_id" class="directory-block">
+            <div class="directory-head">
+              <div class="directory-title">
+                <el-tag type="info" size="small">目录</el-tag>
+                <strong>{{ dir.task_name }}</strong>
+                <span class="directory-meta">
+                  负责人：{{ dir.owner_name || '-' }} · 子任务 {{ dir.subtask_count }} 个 · 通过率 {{ (dir.pass_rate * 100).toFixed(1) }}%（已测 {{ dir.tested_count }}/{{ dir.total_cases }}）
+                </span>
+              </div>
+              <div class="directory-actions">
+                <el-button size="small" type="primary" @click="openAddSubtaskDialog(dir)">添加子任务</el-button>
+                <el-button size="small" type="danger" @click="handleDeleteDir(dir)">删除目录</el-button>
+              </div>
+            </div>
+
+            <el-table :data="dir.subtasks" border size="small" empty-text="该目录下还没有子任务，点击「添加子任务」创建">
+              <el-table-column prop="task_id" label="ID" width="80" />
+              <el-table-column prop="task_name" label="子任务名称" min-width="200" show-overflow-tooltip />
+              <el-table-column label="执行人" min-width="140" show-overflow-tooltip>
+                <template #default="{ row }">{{ (row.assignee_names || []).join('、') || '-' }}</template>
+              </el-table-column>
+              <el-table-column label="通过率" width="160">
+                <template #default="{ row }">
+                  <el-progress :percentage="row.pass_rate ? Math.round(row.pass_rate * 100) : 0" :stroke-width="8" />
+                </template>
+              </el-table-column>
+              <el-table-column label="已测用例" width="100">
+                <template #default="{ row }">{{ row.tested_count || 0 }} / {{ row.total_cases || 0 }}</template>
+              </el-table-column>
+              <el-table-column label="状态" width="100">
+                <template #default="{ row }">
+                  <el-tag :type="taskStatusTagType(row.status)">{{ STATUS_TEXT[row.status] || row.status }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="220" fixed="right">
+                <template #default="{ row }">
+                  <el-button size="small" type="primary" @click="$router.push(`/tasks/${row.task_id}`)">详情</el-button>
+                  <el-button size="small" type="warning" :disabled="row.status === 'cancelled' || row.status === 'finished'" @click="handleCancelSubtask(row)">取消</el-button>
+                  <el-button size="small" type="danger" @click="handleDeleteSubtask(row)">删除</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </template>
+        <el-empty v-else description="暂无目录，点击「创建目录」开始" />
       </div>
     </div>
 
-    <div class="page-card">
-      <div class="filter-bar">
-        <el-input v-model="filters.keyword" clearable placeholder="按任务名称/描述搜索" class="keyword-input" @keyup.enter="search" @clear="search" />
-        <el-select v-model="filters.status" clearable placeholder="全部状态" class="filter-select" @change="search">
-          <el-option v-for="option in taskStatusOptions" :key="option.value" :label="option.label" :value="option.value" />
-        </el-select>
-        <el-button @click="resetFilters">重置筛选</el-button>
-        <span class="filter-count">共 {{ total }} 条</span>
-      </div>
-      <el-table v-loading="loading" :data="tasks" border>
-        <el-table-column prop="task_id" label="ID" width="80" />
-        <el-table-column prop="task_name" label="任务名称" min-width="220" />
-        <el-table-column prop="description" label="任务描述" min-width="260" show-overflow-tooltip />
-        <el-table-column label="状态" width="110">
-          <template #default="{ row }">
-            <el-tag :type="taskStatusTagType(row.status)">{{ STATUS_TEXT[row.status] || row.status }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="开始时间" width="190">
-          <template #default="{ row }">{{ formatDateTime(row.start_time) }}</template>
-        </el-table-column>
-        <el-table-column label="结束时间" width="190">
-          <template #default="{ row }">{{ formatDateTime(row.end_time) }}</template>
-        </el-table-column>
-        <el-table-column label="创建时间" width="190">
-          <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
-        </el-table-column>
-        <el-table-column label="操作" width="280" fixed="right">
-          <template #default="{ row }">
-            <el-button size="small" type="primary" @click="$router.push(`/tasks/${row.task_id}`)">详情</el-button>
-            <el-button size="small" @click="$router.push('/executor')">执行工作台</el-button>
-            <el-button size="small" type="warning" :disabled="row.status === 'cancelled' || row.status === 'finished'" @click="handleCancelTask(row)">取消</el-button>
-            <el-button size="small" type="danger" @click="handleDeleteTask(row)">删除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-      <el-pagination
-        class="pager"
-        background
-        layout="prev, pager, next, total"
-        :total="total"
-        :page-size="pageSize"
-        v-model:current-page="page"
-      />
-    </div>
-
-    <el-dialog v-model="createDialogVisible" title="创建测试任务" width="720px">
-      <el-form label-width="100px">
-        <el-form-item label="任务名称">
-          <el-input v-model="createForm.task_name" placeholder="例如：夜视功能回归测试任务" />
+    <!-- 创建目录 -->
+    <el-dialog v-model="createDirDialogVisible" title="创建任务目录" width="520px">
+      <el-form label-width="90px">
+        <el-form-item label="目录名称">
+          <el-input v-model="dirForm.task_name" placeholder="例如：摄像头功能回归测试" />
         </el-form-item>
-        <el-form-item label="任务描述">
-          <el-input v-model="createForm.description" type="textarea" :rows="3" placeholder="请输入本次测试目标、范围或注意事项" />
+        <el-form-item label="负责人">
+          <el-input-number v-model="dirForm.owner_id" :min="1" />
+        </el-form-item>
+        <el-form-item label="描述">
+          <el-input v-model="dirForm.description" type="textarea" :rows="3" placeholder="可选" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="createDirDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="creating" @click="handleCreateDir">创建目录</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 添加子任务 -->
+    <el-dialog v-model="addSubtaskDialogVisible" title="添加子任务" width="720px">
+      <el-form label-width="100px">
+        <el-form-item label="所属目录">
+          <el-input :model-value="currentDir?.task_name" disabled />
+        </el-form-item>
+        <el-form-item label="子任务名称">
+          <el-input v-model="subtaskForm.task_name" placeholder="例如：夜视红外灯回归用例执行" />
         </el-form-item>
         <el-form-item label="绑定用例集">
-          <el-select v-model="createForm.case_set_ids" multiple filterable placeholder="请选择一个或多个用例集" class="wide-select">
+          <el-select v-model="subtaskForm.case_set_ids" multiple filterable placeholder="请选择一个或多个用例集" class="wide-select">
             <el-option
               v-for="caseSet in caseSets"
               :key="caseSet.case_set_id"
@@ -107,104 +113,118 @@
             class="wide-select"
           />
         </el-form-item>
-        <el-form-item label="起止时间">
-          <el-date-picker
-            v-model="dateRange"
-            type="datetimerange"
-            range-separator="至"
-            start-placeholder="开始时间"
-            end-placeholder="结束时间"
-            value-format="YYYY-MM-DDTHH:mm:ss"
-          />
-        </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="createDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="creating" @click="handleCreateTask">创建任务</el-button>
+        <el-button @click="addSubtaskDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="creating" @click="handleCreateSubtask">创建子任务</el-button>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { onMounted, reactive, ref, watch } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { listCaseSets } from '../api/case'
-import { cancelTask, createTask, deleteTask, listTasks } from '../api/task'
+import { cancelTask, createTask, deleteTask, listSubtasks, listTaskDirectories } from '../api/task'
 import { STATUS_TEXT } from '../utils/constants'
-import { formatDateTime } from '../utils/format'
 import { confirmAction, showSuccess, showWarning } from '../utils/message'
 import { getCurrentUserId } from '../utils/storage'
 
 const loading = ref(false)
 const creating = ref(false)
-const createDialogVisible = ref(false)
-const tasks = ref([])
-const total = ref(0)
-const page = ref(1)
-const pageSize = ref(10)
+const createDirDialogVisible = ref(false)
+const addSubtaskDialogVisible = ref(false)
+const directories = ref([])
 const caseSets = ref([])
+const currentDir = ref(null)
 const assigneeInputValues = ref([String(getCurrentUserId())])
-const dateRange = ref([])
-const filters = reactive({ keyword: '', status: '' })
-const createForm = reactive({
+
+const dirForm = reactive({
   task_name: '',
   description: '',
+  owner_id: getCurrentUserId()
+})
+
+const subtaskForm = reactive({
+  task_name: '',
   case_set_ids: []
 })
 
-const taskStatusOptions = ['assigned', 'running', 'finished', 'cancelled'].map(value => ({ value, label: STATUS_TEXT[value] || value }))
-
-async function loadTasks() {
+async function loadDirectories() {
   loading.value = true
   try {
-    const result = await listTasks({
-      page: page.value,
-      page_size: pageSize.value,
-      keyword: filters.keyword.trim() || undefined,
-      status: filters.status || undefined
-    })
-    tasks.value = Array.isArray(result) ? result : result.items || []
-    total.value = Array.isArray(result) ? result.length : result.total || 0
+    const result = await listTaskDirectories({ page: 1, page_size: 100 })
+    const dirs = result.items || []
+    const withSubtasks = await Promise.all(
+      dirs.map(async dir => {
+        let subtasks = []
+        try {
+          const subResult = await listSubtasks(dir.task_id, { page: 1, page_size: 100 })
+          subtasks = subResult.items || []
+        } catch {
+          subtasks = []
+        }
+        return { ...dir, subtasks }
+      })
+    )
+    directories.value = withSubtasks
   } finally {
     loading.value = false
   }
 }
-
-function search() {
-  page.value = 1
-  loadTasks()
-}
-
-watch(page, () => {
-  loadTasks()
-})
 
 async function loadCaseSets() {
   const result = await listCaseSets({ page: 1, page_size: 100, status: 'active' })
   caseSets.value = result.items || []
 }
 
-async function openCreateDialog() {
-  resetCreateForm()
-  await loadCaseSets()
-  createDialogVisible.value = true
+function openCreateDirDialog() {
+  dirForm.task_name = ''
+  dirForm.description = ''
+  dirForm.owner_id = getCurrentUserId()
+  createDirDialogVisible.value = true
 }
 
-function resetCreateForm() {
-  createForm.task_name = ''
-  createForm.description = ''
-  createForm.case_set_ids = []
-  assigneeInputValues.value = [String(getCurrentUserId())]
-  dateRange.value = []
-}
-
-async function handleCreateTask() {
-  const assigneeIds = normalizeAssigneeIds()
-  if (!createForm.task_name.trim()) {
-    showWarning('请填写任务名称')
+async function handleCreateDir() {
+  if (!dirForm.task_name.trim()) {
+    showWarning('请填写目录名称')
     return
   }
-  if (!createForm.case_set_ids.length) {
+  creating.value = true
+  try {
+    await createTask({
+      task_name: dirForm.task_name.trim(),
+      description: dirForm.description.trim() || null,
+      owner_id: dirForm.owner_id,
+      parent_id: null,
+      case_set_ids: [],
+      assignee_ids: [],
+      created_by: getCurrentUserId()
+    })
+    showSuccess('目录创建成功')
+    createDirDialogVisible.value = false
+    await loadDirectories()
+  } finally {
+    creating.value = false
+  }
+}
+
+async function openAddSubtaskDialog(dir) {
+  currentDir.value = dir
+  subtaskForm.task_name = ''
+  subtaskForm.case_set_ids = []
+  assigneeInputValues.value = [String(getCurrentUserId())]
+  await loadCaseSets()
+  addSubtaskDialogVisible.value = true
+}
+
+async function handleCreateSubtask() {
+  const assigneeIds = normalizeAssigneeIds()
+  if (!subtaskForm.task_name.trim()) {
+    showWarning('请填写子任务名称')
+    return
+  }
+  if (!subtaskForm.case_set_ids.length) {
     showWarning('请至少选择一个用例集')
     return
   }
@@ -216,17 +236,16 @@ async function handleCreateTask() {
   creating.value = true
   try {
     const created = await createTask({
-      task_name: createForm.task_name.trim(),
-      description: createForm.description.trim() || null,
-      case_set_ids: createForm.case_set_ids,
+      task_name: subtaskForm.task_name.trim(),
+      parent_id: currentDir.value.task_id,
+      owner_id: dirForm.owner_id,
+      case_set_ids: subtaskForm.case_set_ids,
       assignee_ids: assigneeIds,
-      start_time: dateRange.value?.[0] || null,
-      end_time: dateRange.value?.[1] || null,
       created_by: getCurrentUserId()
     })
-    showSuccess(`测试任务创建成功，生成 ${created.total_executions} 条执行记录`)
-    createDialogVisible.value = false
-    await loadTasks()
+    showSuccess(`子任务创建成功，生成 ${created.total_executions} 条执行记录`)
+    addSubtaskDialogVisible.value = false
+    await loadDirectories()
   } finally {
     creating.value = false
   }
@@ -240,28 +259,25 @@ function normalizeAssigneeIds() {
   ))
 }
 
-async function handleCancelTask(row) {
-  await confirmAction(`确认取消任务「${row.task_name}」吗？取消后任务状态将变为已取消。`, '取消测试任务')
+async function handleCancelSubtask(row) {
+  await confirmAction(`确认取消子任务「${row.task_name}」吗？`, '取消子任务')
   await cancelTask(row.task_id)
-  showSuccess('测试任务已取消')
-  await loadTasks()
+  showSuccess('子任务已取消')
+  await loadDirectories()
 }
 
-async function handleDeleteTask(row) {
-  await confirmAction(`确认删除任务「${row.task_name}」吗？删除后任务将不再出现在列表中。`, '删除测试任务')
+async function handleDeleteSubtask(row) {
+  await confirmAction(`确认删除子任务「${row.task_name}」吗？`, '删除子任务')
   await deleteTask(row.task_id)
-  showSuccess('测试任务已删除')
-  await loadTasks()
+  showSuccess('子任务已删除')
+  await loadDirectories()
 }
 
-function resetFilters() {
-  filters.keyword = ''
-  filters.status = ''
-  search()
-}
-
-function countByStatus(status) {
-  return tasks.value.filter(task => task.status === status).length
+async function handleDeleteDir(dir) {
+  await confirmAction(`确认删除目录「${dir.task_name}」吗？其下 ${dir.subtask_count} 个子任务不会被级联删除，但目录删除后子任务变为独立任务。`, '删除目录')
+  await deleteTask(dir.task_id)
+  showSuccess('目录已删除')
+  await loadDirectories()
 }
 
 function taskStatusTagType(status) {
@@ -272,8 +288,9 @@ function taskStatusTagType(status) {
   return 'info'
 }
 
-onMounted(async () => {
-  await Promise.all([loadTasks(), loadCaseSets()])
+onMounted(() => {
+  loadDirectories()
+  loadCaseSets()
 })
 </script>
 
@@ -282,11 +299,6 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 16px;
-}
-
-.pager {
-  margin-top: 16px;
-  justify-content: flex-end;
 }
 
 .page-header-row {
@@ -301,47 +313,49 @@ onMounted(async () => {
   gap: 8px;
 }
 
-.filter-bar {
+.directory-list {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.directory-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.directory-head {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 14px;
-}
-
-.keyword-input {
-  width: 260px;
-}
-
-.filter-select {
-  width: 150px;
-}
-
-.filter-count {
-  color: #64748b;
-  font-size: 13px;
-}
-
-.summary-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  justify-content: space-between;
   gap: 12px;
 }
 
-.summary-card {
+.directory-title {
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
-.summary-card span {
+.directory-title strong {
+  color: #1f2937;
+  font-size: 16px;
+}
+
+.directory-meta {
   color: #64748b;
   font-size: 13px;
 }
 
-.summary-card strong {
-  color: #1f2937;
-  font-size: 28px;
+.directory-actions {
+  display: flex;
+  gap: 8px;
 }
 
 .wide-select {

@@ -9,7 +9,9 @@ class TestTask(Base):
     __tablename__ = "test_tasks"
 
     task_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    parent_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("test_tasks.task_id"))
     task_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    owner_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.user_id"))
     description: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="draft")
     start_time: Mapped[DateTime | None] = mapped_column(DateTime)

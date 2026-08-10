@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.models.case import TestCaseNode, TestCaseSet
 from app.models.task import TestExecutionRecord, TestTask, TestTaskAssignee, TestTaskCaseSet
+from app.models.user import User
 from app.schemas.task import ExecutionUpdate, TaskCreate
 from app.services.case_service import ensure_user_exists
 
@@ -16,8 +17,32 @@ VALID_EXECUTION_STATUS = {"not_run", "passed", "failed", "blocked", "skipped"}
 def create_task(db: Session, data: TaskCreate) -> dict:
     ensure_user_exists(db, data.created_by)
 
+    owner_id = data.owner_id or data.created_by
+    ensure_user_exists(db, owner_id)
+
+    task = TestTask(
+        task_name=data.task_name,
+        description=data.description,
+        parent_id=data.parent_id,
+        owner_id=owner_id,
+        status="assigned",
+        start_time=data.start_time,
+        end_time=data.end_time,
+        created_by=data.created_by,
+    )
+    db.add(task)
+    db.flush()
+
+    # 目录（不绑定用例集/执行人）只建任务本体，不生成执行记录。
+    if not data.case_set_ids:
+        task.status = "draft" if data.parent_id else "assigned"
+        db.commit()
+        return get_task_detail(db, task.task_id)
+
     case_set_ids = list(dict.fromkeys(data.case_set_ids))
     assignee_ids = list(dict.fromkeys(data.assignee_ids))
+    if not assignee_ids:
+        raise HTTPException(status_code=400, detail="请至少指定一个执行人")
 
     for assignee_id in assignee_ids:
         ensure_user_exists(db, assignee_id)
@@ -42,26 +67,28 @@ def create_task(db: Session, data: TaskCreate) -> dict:
     if not case_nodes:
         raise HTTPException(status_code=400, detail="绑定的用例集中没有可执行的用例节点")
 
-    task = TestTask(
-        task_name=data.task_name,
-        description=data.description,
-        status="assigned",
-        start_time=data.start_time,
-        end_time=data.end_time,
-        created_by=data.created_by,
-    )
-    db.add(task)
-    db.flush()
-
     for case_set_id in case_set_ids:
         db.add(TestTaskCaseSet(task_id=task.task_id, case_set_id=case_set_id))
 
+    build_execution_records(db, task.task_id, case_nodes, assignee_ids)
+
+    db.commit()
+    return get_task_detail(db, task.task_id)
+
+
+def build_execution_records(
+    db: Session,
+    task_id: int,
+    case_nodes: list[TestCaseNode],
+    assignee_ids: list[int],
+) -> None:
+    """为每个执行人 × 每个 case 节点生成执行记录（含内容快照）。"""
     for assignee_id in assignee_ids:
-        db.add(TestTaskAssignee(task_id=task.task_id, assignee_id=assignee_id, assign_status="assigned"))
+        db.add(TestTaskAssignee(task_id=task_id, assignee_id=assignee_id, assign_status="assigned"))
         for node in case_nodes:
             db.add(
                 TestExecutionRecord(
-                    task_id=task.task_id,
+                    task_id=task_id,
                     case_node_id=node.node_id,
                     executor_id=assignee_id,
                     execution_status="not_run",
@@ -70,9 +97,6 @@ def create_task(db: Session, data: TaskCreate) -> dict:
                     case_node_snapshot=build_node_snapshot(node),
                 )
             )
-
-    db.commit()
-    return get_task_detail(db, task.task_id)
 
 
 def list_tasks(
@@ -438,3 +462,266 @@ def enrich_executions(db: Session, executions: list[TestExecutionRecord]) -> lis
         }
         result.append(item)
     return result
+
+
+# ---------------------------------------------------------------------------
+# 任务目录 / 子任务 / 执行树
+# ---------------------------------------------------------------------------
+
+def _user_name_map(db: Session, user_ids: set[int]) -> dict[int, str]:
+    """批量取用户名映射，避免逐个查询。"""
+    if not user_ids:
+        return {}
+    users = list(
+        db.scalars(select(User).where(User.user_id.in_(user_ids), User.is_deleted == 0)).all()
+    )
+    return {user.user_id: user.real_name or user.username for user in users}
+
+
+def _subtask_ids(db: Session, parent_id: int) -> list[int]:
+    return list(
+        db.scalars(
+            select(TestTask.task_id)
+            .where(TestTask.parent_id == parent_id, TestTask.is_deleted == 0)
+            .order_by(TestTask.task_id.asc())
+        ).all()
+    )
+
+
+def list_task_directories(
+    db: Session,
+    page: int,
+    page_size: int,
+    keyword: str | None = None,
+) -> dict:
+    """任务目录列表：父任务（或独立单层任务），附子任务聚合统计。"""
+    # 目录 = parent_id 为空 或 本身是别人的父任务
+    sub_parent_ids = list(
+        db.scalars(select(TestTask.parent_id).where(TestTask.parent_id.is_not(None), TestTask.is_deleted == 0)).all()
+    )
+    conditions = [
+        TestTask.is_deleted == 0,
+        or_(TestTask.parent_id.is_(None), TestTask.task_id.in_(sub_parent_ids)),
+    ]
+    if keyword and keyword.strip():
+        conditions.append(TestTask.task_name.like(f"%{keyword.strip()}%"))
+
+    total = db.scalar(select(func.count()).select_from(TestTask).where(*conditions)) or 0
+    directories = list(
+        db.scalars(
+            select(TestTask)
+            .where(*conditions)
+            .order_by(TestTask.task_id.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        ).all()
+    )
+    if not directories:
+        return {"total": 0, "page": page, "page_size": page_size, "items": []}
+
+    owner_ids = {dir_.owner_id for dir_ in directories if dir_.owner_id}
+    name_map = _user_name_map(db, owner_ids)
+
+    items = []
+    for directory in directories:
+        subtasks = _subtask_ids(db, directory.task_id)
+        stats = _aggregate_subtask_stats(db, subtasks)
+        items.append({
+            "task_id": directory.task_id,
+            "task_name": directory.task_name,
+            "description": directory.description,
+            "status": directory.status,
+            "owner_id": directory.owner_id,
+            "owner_name": name_map.get(directory.owner_id),
+            "created_by": directory.created_by,
+            "created_at": directory.created_at,
+            "updated_at": directory.updated_at,
+            "subtask_count": len(subtasks),
+            **stats,
+        })
+
+    return {"total": total, "page": page, "page_size": page_size, "items": items}
+
+
+def _aggregate_subtask_stats(db: Session, subtask_ids: list[int]) -> dict:
+    """对一组子任务聚合执行统计：用例总数、已测数、通过数、通过率。"""
+    if not subtask_ids:
+        return {"total_cases": 0, "tested_count": 0, "passed_count": 0, "pass_rate": 0.0}
+
+    # 每个子任务的独立用例数（case_node_id 去重）
+    case_node_ids = set(
+        db.scalars(
+            select(TestExecutionRecord.case_node_id)
+            .where(TestExecutionRecord.task_id.in_(subtask_ids))
+            .distinct()
+        ).all()
+    )
+    total_cases = len(case_node_ids)
+
+    executed = list(
+        db.scalars(
+            select(TestExecutionRecord.execution_status)
+            .where(TestExecutionRecord.task_id.in_(subtask_ids), TestExecutionRecord.executed_at.is_not(None))
+        ).all()
+    )
+    tested_count = len(executed)
+    passed_count = sum(1 for status in executed if status == "passed")
+    pass_rate = round(passed_count / tested_count, 4) if tested_count else 0.0
+    return {
+        "total_cases": total_cases,
+        "tested_count": tested_count,
+        "passed_count": passed_count,
+        "pass_rate": pass_rate,
+    }
+
+
+def list_subtasks(
+    db: Session,
+    parent_id: int,
+    page: int,
+    page_size: int,
+    executor_id: int | None = None,
+) -> dict:
+    """目录下的子任务列表，含各自执行统计与负责人/执行人姓名。"""
+    parent = db.get(TestTask, parent_id)
+    if not parent or parent.is_deleted == 1:
+        raise HTTPException(status_code=404, detail="目录不存在")
+
+    conditions = [TestTask.parent_id == parent_id, TestTask.is_deleted == 0]
+    if executor_id is not None:
+        conditions.append(TestTask.task_id.in_(
+            select(TestTaskAssignee.task_id).where(TestTaskAssignee.assignee_id == executor_id)
+        ))
+
+    total = db.scalar(select(func.count()).select_from(TestTask).where(*conditions)) or 0
+    subtasks = list(
+        db.scalars(
+            select(TestTask)
+            .where(*conditions)
+            .order_by(TestTask.task_id.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        ).all()
+    )
+    if not subtasks:
+        return {"total": 0, "page": page, "page_size": page_size, "items": []}
+
+    subtask_ids = [t.task_id for t in subtasks]
+    owner_ids = {t.owner_id for t in subtasks if t.owner_id}
+    name_map = _user_name_map(db, owner_ids)
+
+    # 执行人姓名：查 task→assignee→user
+    assignee_rows = list(
+        db.scalars(
+            select(TestTaskAssignee).where(TestTaskAssignee.task_id.in_(subtask_ids))
+        ).all()
+    )
+    assignee_user_ids = {row.assignee_id for row in assignee_rows}
+    assignee_name_map = _user_name_map(db, assignee_user_ids)
+    assignee_ids_by_task: dict[int, list[int]] = {}
+    for row in assignee_rows:
+        assignee_ids_by_task.setdefault(row.task_id, []).append(row.assignee_id)
+
+    items = []
+    for task in subtasks:
+        stats = _aggregate_subtask_stats(db, [task.task_id])
+        items.append({
+            "task_id": task.task_id,
+            "parent_id": task.parent_id,
+            "parent_name": parent.task_name,
+            "task_name": task.task_name,
+            "description": task.description,
+            "status": task.status,
+            "owner_id": task.owner_id,
+            "owner_name": name_map.get(task.owner_id),
+            "start_time": task.start_time,
+            "end_time": task.end_time,
+            "created_by": task.created_by,
+            "updated_by": task.updated_by,
+            "created_at": task.created_at,
+            "updated_at": task.updated_at,
+            "case_set_ids": list(
+                db.scalars(select(TestTaskCaseSet.case_set_id).where(TestTaskCaseSet.task_id == task.task_id)).all()
+            ),
+            "assignee_ids": assignee_ids_by_task.get(task.task_id, []),
+            "assignee_names": [assignee_name_map.get(uid, str(uid)) for uid in assignee_ids_by_task.get(task.task_id, [])],
+            "total_executions": 0,
+            "passed_count": stats["passed_count"],
+            "failed_count": 0,
+            "blocked_count": 0,
+            "not_run_count": 0,
+            **{k: stats[k] for k in ("total_cases", "tested_count", "pass_rate")},
+        })
+
+    return {"total": total, "page": page, "page_size": page_size, "items": items}
+
+
+def get_subtask_execution_tree(db: Session, task_id: int, executor_id: int) -> dict:
+    """子任务的用例树 + 当前执行人的执行状态映射，供思维导图执行页使用。"""
+    ensure_user_exists(db, executor_id)
+    task = db.get(TestTask, task_id)
+    if not task or task.is_deleted == 1:
+        raise HTTPException(status_code=404, detail="子任务不存在")
+
+    from app.services.case_service import get_case_tree
+
+    case_set_ids = list(
+        db.scalars(select(TestTaskCaseSet.case_set_id).where(TestTaskCaseSet.task_id == task_id)).all()
+    )
+    tree: list[dict] = []
+    for case_set_id in case_set_ids:
+        case_set = db.get(TestCaseSet, case_set_id)
+        roots = get_case_tree(db, case_set_id)
+        if not roots:
+            continue
+        # 多个用例集时，用一个目录根节点包起来，标明用例集名。
+        if len(case_set_ids) > 1 or (case_set and case_set.name):
+            tree.append({
+                "node_id": -case_set_id,
+                "case_set_id": case_set_id,
+                "parent_id": None,
+                "node_type": "folder",
+                "title": case_set.name if case_set else f"用例集#{case_set_id}",
+                "precondition": None,
+                "test_steps": None,
+                "expected_result": None,
+                "priority": "P1",
+                "sort_order": 0,
+                "children": roots,
+            })
+        else:
+            tree.extend(roots)
+
+    executions = list_task_executions(db, task_id)
+    my_executions = [item for item in executions if item["executor_id"] == executor_id]
+    status_map: dict[str, str] = {
+        str(item["case_node_id"]): item["execution_status"] for item in my_executions
+    }
+
+    assignee = db.scalar(
+        select(TestTaskAssignee).where(
+            TestTaskAssignee.task_id == task_id,
+            TestTaskAssignee.assignee_id == executor_id,
+        )
+    )
+    assign_status = assignee.assign_status if assignee else "assigned"
+
+    parent_name = None
+    if task.parent_id:
+        parent = db.get(TestTask, task.parent_id)
+        parent_name = parent.task_name if parent else None
+
+    stats = _aggregate_subtask_stats(db, [task_id])
+    return {
+        "task_id": task_id,
+        "task_name": task.task_name,
+        "parent_id": task.parent_id,
+        "parent_name": parent_name,
+        "assign_status": assign_status,
+        "case_set_ids": case_set_ids,
+        "tree": tree,
+        "status_map": status_map,
+        "total_cases": stats["total_cases"],
+        "tested_count": stats["tested_count"],
+        "passed_count": stats["passed_count"],
+    }

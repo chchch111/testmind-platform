@@ -24,7 +24,8 @@ const router = createRouter({
         { path: '403', component: () => import('../views/Forbidden.vue'), meta: { title: '无权限访问' } },
         { path: 'tasks', component: () => import('../views/TaskList.vue'), meta: { title: '测试任务管理' } },
         { path: 'tasks/:id', component: () => import('../views/TaskDetail.vue'), meta: { title: '测试任务详情' } },
-        { path: 'executor', component: () => import('../views/ExecutorWork.vue'), meta: { title: '执行工作台' } }
+        { path: 'executor', component: () => import('../views/ExecutorDirectory.vue'), meta: { title: '执行工作台' } },
+        { path: 'executor/tasks/:id', component: () => import('../views/ExecutorTaskDetail.vue'), meta: { title: '用例执行' } }
       ]
     }
   ]

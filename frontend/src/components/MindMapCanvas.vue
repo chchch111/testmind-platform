@@ -25,6 +25,7 @@
             :node-links-map="nodeLinksMap"
             :node-images-map="nodeImagesMap"
             :node-reviews-map="nodeReviewsMap"
+            :node-execution-status-map="nodeExecutionStatusMap"
             :collapsed-node-ids="collapsedNodeIds"
             :appearance="appearance"
             @select="emitSelect"
@@ -86,6 +87,10 @@ const props = defineProps({
     default: () => ({})
   },
   nodeReviewsMap: {
+    type: Object,
+    default: () => ({})
+  },
+  nodeExecutionStatusMap: {
     type: Object,
     default: () => ({})
   },

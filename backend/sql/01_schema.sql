@@ -160,7 +160,9 @@ CREATE TABLE test_case_node_versions (
 
 CREATE TABLE test_tasks (
     task_id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '测试任务ID',
+    parent_id BIGINT DEFAULT NULL COMMENT '父任务ID（目录），子任务指向目录',
     task_name VARCHAR(200) NOT NULL COMMENT '任务名称',
+    owner_id BIGINT DEFAULT NULL COMMENT '负责人ID',
     description TEXT DEFAULT NULL COMMENT '任务说明',
     status VARCHAR(30) NOT NULL DEFAULT 'draft' COMMENT '任务状态：draft/assigned/running/finished/cancelled',
     start_time DATETIME DEFAULT NULL COMMENT '计划开始时间',
@@ -172,9 +174,12 @@ CREATE TABLE test_tasks (
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     CONSTRAINT fk_test_tasks_created_by FOREIGN KEY (created_by) REFERENCES users(user_id),
     CONSTRAINT fk_test_tasks_updated_by FOREIGN KEY (updated_by) REFERENCES users(user_id),
+    CONSTRAINT fk_test_tasks_parent FOREIGN KEY (parent_id) REFERENCES test_tasks(task_id) ON DELETE SET NULL,
+    CONSTRAINT fk_test_tasks_owner FOREIGN KEY (owner_id) REFERENCES users(user_id),
     INDEX idx_test_tasks_status (status),
     INDEX idx_test_tasks_is_deleted (is_deleted),
-    INDEX idx_test_tasks_created_by (created_by)
+    INDEX idx_test_tasks_created_by (created_by),
+    INDEX idx_test_tasks_parent_id (parent_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='测试任务表';
 
 CREATE TABLE test_task_case_sets (
