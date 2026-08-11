@@ -11,8 +11,18 @@ export const ROLE_TEXT = {
 
 export const SOURCE_TYPE_TEXT = {
   manual: '手动创建',
+  manual_text: '手动粘贴',
+  history_doc: '历史文档',
+  xmind_case: 'XMind用例',
   xmind_import: 'XMind导入',
   ai_generated: 'AI生成'
+}
+
+export const INDEX_STATUS_TEXT = {
+  none: '未构建',
+  rebuilding: '构建中',
+  active: '可用',
+  deleted: '已删除'
 }
 
 export const STATUS_TEXT = {

@@ -8,6 +8,14 @@ export function createKnowledgeBase(data) {
   return request.post('/api/rag/knowledge-bases', data)
 }
 
+export function updateKnowledgeBase(knowledgeBaseId, data) {
+  return request.put(`/api/rag/knowledge-bases/${knowledgeBaseId}`, data)
+}
+
+export function deleteKnowledgeBase(knowledgeBaseId) {
+  return request.delete(`/api/rag/knowledge-bases/${knowledgeBaseId}`)
+}
+
 export function addManualSource(knowledgeBaseId, data) {
   return request.post(`/api/rag/knowledge-bases/${knowledgeBaseId}/sources/manual`, data)
 }
@@ -36,6 +44,10 @@ export function deleteKnowledgeSource(sourceId) {
 
 export function buildIndex(knowledgeBaseId) {
   return request.post(`/api/rag/knowledge-bases/${knowledgeBaseId}/build-index`)
+}
+
+export function getBuildProgress(knowledgeBaseId, taskId) {
+  return request.get(`/api/rag/knowledge-bases/${knowledgeBaseId}/build-index/${taskId}`)
 }
 
 export function searchKnowledgeBase(knowledgeBaseId, data) {

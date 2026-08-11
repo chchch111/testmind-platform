@@ -11,6 +11,14 @@ class KnowledgeBaseCreate(BaseModel):
     created_by: int = 1
 
 
+class KnowledgeBaseUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = None
+    product_type: str | None = None
+    hardware_module: str | None = None
+    status: str | None = None
+
+
 class KnowledgeBaseOut(BaseModel):
     knowledge_base_id: int
     name: str
@@ -22,6 +30,9 @@ class KnowledgeBaseOut(BaseModel):
     updated_by: int | None
     created_at: datetime
     updated_at: datetime
+    source_count: int = 0
+    chunk_count: int = 0
+    index_status: str = "none"
 
     model_config = {"from_attributes": True}
 
@@ -40,6 +51,9 @@ class KnowledgeSourceOut(BaseModel):
     source_type: str
     status: str
     created_by: int
+    file_name: str | None = None
+    content_text: str | None = None
+    case_set_id: int | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -66,6 +80,7 @@ class RagSearchRequest(BaseModel):
 class RagSearchItem(BaseModel):
     chunk_id: int
     source_id: int
+    source_name: str | None = None
     score: float
     chunk_text: str
     metadata: dict | None

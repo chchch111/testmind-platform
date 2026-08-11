@@ -8,6 +8,7 @@ from app.schemas.rag import (
     BuildIndexOut,
     KnowledgeBaseCreate,
     KnowledgeBaseOut,
+    KnowledgeBaseUpdate,
     KnowledgeSourceOut,
     ManualSourceCreate,
     RagSearchOut,
@@ -17,11 +18,15 @@ from app.services.rag_service import (
     add_manual_source,
     build_faiss_index,
     create_knowledge_base,
+    delete_knowledge_base,
     delete_knowledge_source,
+    get_build_progress,
     import_case_set_as_source,
     list_knowledge_bases,
     list_knowledge_sources,
     search_knowledge_base,
+    start_build_faiss_index,
+    update_knowledge_base,
     upload_knowledge_source_file,
 )
 
@@ -42,6 +47,25 @@ def api_create_knowledge_base(
 @router.get("/knowledge-bases", response_model=list[KnowledgeBaseOut])
 def api_list_knowledge_bases(db: Session = Depends(get_db)):
     return list_knowledge_bases(db)
+
+
+@router.put("/knowledge-bases/{knowledge_base_id}", response_model=KnowledgeBaseOut)
+def api_update_knowledge_base(
+    knowledge_base_id: int,
+    data: KnowledgeBaseUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    return update_knowledge_base(db, knowledge_base_id, data, current_user.user_id)
+
+
+@router.delete("/knowledge-bases/{knowledge_base_id}")
+def api_delete_knowledge_base(
+    knowledge_base_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    return delete_knowledge_base(db, knowledge_base_id, current_user.user_id)
 
 
 @router.post("/knowledge-bases/{knowledge_base_id}/sources/manual", response_model=KnowledgeSourceOut)
@@ -89,13 +113,23 @@ def api_delete_knowledge_source(
     return delete_knowledge_source(db, source_id, current_user.user_id)
 
 
-@router.post("/knowledge-bases/{knowledge_base_id}/build-index", response_model=BuildIndexOut)
+@router.post("/knowledge-bases/{knowledge_base_id}/build-index")
 def api_build_faiss_index(
     knowledge_base_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    return build_faiss_index(db, knowledge_base_id, current_user.user_id)
+    return start_build_faiss_index(knowledge_base_id, current_user.user_id)
+
+
+@router.get("/knowledge-bases/{knowledge_base_id}/build-index/{task_id}")
+def api_get_build_progress(
+    knowledge_base_id: int,
+    task_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    return get_build_progress(task_id)
 
 
 @router.post("/knowledge-bases/{knowledge_base_id}/search", response_model=RagSearchOut)
