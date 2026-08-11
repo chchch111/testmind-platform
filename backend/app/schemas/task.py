@@ -20,6 +20,7 @@ class TaskOut(BaseModel):
     parent_id: int | None = None
     task_name: str
     owner_id: int | None = None
+    owner_name: str | None = None
     description: str | None
     status: str
     start_time: datetime | None
@@ -58,6 +59,7 @@ class ExecutionOut(BaseModel):
     case_node_snapshot: dict | None = None
     case_node_deleted: bool | None = None
     executor_id: int
+    executor_name: str | None = None
     execution_status: str
     actual_result: str | None
     bug_description: str | None
@@ -130,6 +132,8 @@ class TaskTreeStatusOut(BaseModel):
     parent_id: int | None = None
     parent_name: str | None = None
     assign_status: str | None = None
+    assignee_ids: list[int] = Field(default_factory=list)
+    assignee_names: list[str] = Field(default_factory=list)
     case_set_ids: list[int] = Field(default_factory=list)
     tree: list[dict] = Field(default_factory=list)
     status_map: dict[str, str] = Field(default_factory=dict)

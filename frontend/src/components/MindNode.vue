@@ -40,7 +40,6 @@
         <button v-if="appearance.showMetaIcons !== false && nodeNote" class="node-note-icon" title="查看备注" @click.stop="handleNoteClick">注</button>
         <button v-if="appearance.showMetaIcons !== false && nodeLink" class="node-meta-icon link-icon" title="查看链接" @click.stop="handleLinkClick">链</button>
         <button v-if="appearance.showMetaIcons !== false && nodeImage" class="node-meta-icon image-icon" title="查看图片" @click.stop="handleImageClick">图</button>
-        <button v-if="appearance.showMetaIcons !== false && nodeReview" class="node-meta-icon review-icon" title="查看评审" @click.stop="handleReviewClick">评</button>
         <span v-for="tag in visibleNodeTags" :key="tag.text" class="node-tag" :style="{ background: tag.color }">
           {{ tag.text }}
         </span>
@@ -61,7 +60,6 @@
             :node-notes-map="nodeNotesMap"
             :node-links-map="nodeLinksMap"
             :node-images-map="nodeImagesMap"
-            :node-reviews-map="nodeReviewsMap"
             :node-execution-status-map="nodeExecutionStatusMap"
             :collapsed-node-ids="collapsedNodeIds"
             :appearance="appearance"
@@ -73,7 +71,6 @@
             @note-click="$emit('note-click', $event)"
             @link-click="$emit('link-click', $event)"
             @image-click="$emit('image-click', $event)"
-            @review-click="$emit('review-click', $event)"
             @toggle-collapse="$emit('toggle-collapse', $event)"
             @node-drag-start="$emit('node-drag-start', $event)"
             @node-drop="$emit('node-drop', $event)"
@@ -133,10 +130,6 @@ const props = defineProps({
     type: Object,
     default: () => ({})
   },
-  nodeReviewsMap: {
-    type: Object,
-    default: () => ({})
-  },
   nodeExecutionStatusMap: {
     type: Object,
     default: () => ({})
@@ -151,7 +144,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['select', 'node-contextmenu', 'title-save', 'edit-cancel', 'edit-request', 'note-click', 'link-click', 'image-click', 'review-click', 'toggle-collapse', 'node-drag-start', 'node-drop', 'node-drag-end'])
+const emit = defineEmits(['select', 'node-contextmenu', 'title-save', 'edit-cancel', 'edit-request', 'note-click', 'link-click', 'image-click', 'toggle-collapse', 'node-drag-start', 'node-drop', 'node-drag-end'])
 const titleInputRef = ref(null)
 const draftTitle = ref(props.node.title || '')
 const dragOver = ref(false)
@@ -166,7 +159,6 @@ const appearance = computed(() => props.appearance || {})
 const nodeNote = computed(() => String(props.nodeNotesMap[props.node.node_id] || '').trim())
 const nodeLink = computed(() => props.nodeLinksMap[props.node.node_id])
 const nodeImage = computed(() => props.nodeImagesMap[props.node.node_id])
-const nodeReview = computed(() => props.nodeReviewsMap[props.node.node_id])
 const nodeExecutionStatus = computed(() => props.nodeExecutionStatusMap[props.node.node_id] || '')
 const nodeClass = computed(() => ({
   'root-node': props.root,
@@ -222,11 +214,6 @@ function handleLinkClick() {
 function handleImageClick() {
   emit('select', props.node)
   emit('image-click', props.node)
-}
-
-function handleReviewClick() {
-  emit('select', props.node)
-  emit('review-click', props.node)
 }
 
 function handleToggleCollapse() {
@@ -456,15 +443,15 @@ function cancelEdit() {
 }
 
 .node-status-badge.status-blocked {
-  color: #92400e;
-  background: #ffedd5;
-  border: 1px solid #fb923c;
+  color: #4c1d95;
+  background: #f3e8ff;
+  border: 1px solid #c084fc;
 }
 
 .node-status-badge.status-skipped {
-  color: #475569;
+  color: #0f172a;
   background: #e2e8f0;
-  border: 1px solid #94a3b8;
+  border: 1px solid #64748b;
 }
 
 .node-status-badge.status-not_run {
@@ -519,17 +506,6 @@ function cancelEdit() {
 .image-icon:hover {
   color: #ffffff;
   background: #059669;
-}
-
-.review-icon {
-  color: #7e22ce;
-  background: #f3e8ff;
-  border: 1px solid #c084fc;
-}
-
-.review-icon:hover {
-  color: #ffffff;
-  background: #9333ea;
 }
 
 .node-tag {

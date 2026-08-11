@@ -139,7 +139,7 @@ function emitAction(action) {
   transition: transform 0.16s ease, box-shadow 0.16s ease;
 }
 
-.ring-node:hover {
+.ring-node:hover:not(.ring-passed) {
   transform: translateY(-2px);
   box-shadow: 0 14px 30px rgba(15, 23, 42, 0.22);
 }
@@ -159,13 +159,19 @@ function emitAction(action) {
   letter-spacing: 1px;
 }
 
-/* 正上方：红色主状态（参考用例编辑强调色 #f05b67） */
+/* 环心：红色主状态「通过」（保留在圆环中央，参考用例编辑菜单主操作） */
 .ring-passed {
-  left: 116px;
-  top: 62px;
-  width: 58px;
-  height: 58px;
+  left: 110px;
+  top: 130px;
+  width: 70px;
+  height: 70px;
   background: radial-gradient(circle at 35% 30%, #f87171, #f05b67);
+  box-shadow: 0 14px 32px rgba(240, 91, 103, 0.45), 0 4px 12px rgba(15, 23, 42, 0.2);
+}
+
+/* 主状态悬停逻辑（与用例编辑一致）：不抬起、阴影不变 */
+.ring-passed:hover {
+  transform: none;
   box-shadow: 0 14px 32px rgba(240, 91, 103, 0.45), 0 4px 12px rgba(15, 23, 42, 0.2);
 }
 
@@ -178,22 +184,20 @@ function emitAction(action) {
   color: rgba(255, 255, 255, 0.88);
 }
 
-/* 左侧：阻塞 */
+/* 环上 120° 等角均匀分布：环心 (145,165) 半径 78，从正上顺时针 */
 .ring-blocked {
-  left: 39px;
-  top: 138px;
-}
-
-/* 右侧：失败 */
-.ring-failed {
-  left: 197px;
-  top: 138px;
-}
-
-/* 正下方：不适用 */
-.ring-skipped {
   left: 118px;
-  top: 216px;
+  top: 60px;
+}
+
+.ring-failed {
+  left: 186px;
+  top: 177px;
+}
+
+.ring-skipped {
+  left: 50px;
+  top: 177px;
 }
 
 /* ---------- 外围胶囊标签 ---------- */

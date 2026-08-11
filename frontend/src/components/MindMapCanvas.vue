@@ -24,7 +24,6 @@
             :node-notes-map="nodeNotesMap"
             :node-links-map="nodeLinksMap"
             :node-images-map="nodeImagesMap"
-            :node-reviews-map="nodeReviewsMap"
             :node-execution-status-map="nodeExecutionStatusMap"
             :collapsed-node-ids="collapsedNodeIds"
             :appearance="appearance"
@@ -36,7 +35,6 @@
             @note-click="emitNoteClick"
             @link-click="emitLinkClick"
             @image-click="emitImageClick"
-            @review-click="emitReviewClick"
             @toggle-collapse="emitToggleCollapse"
             @node-drag-start="emitNodeDragStart"
             @node-drop="emitNodeDrop"
@@ -86,10 +84,6 @@ const props = defineProps({
     type: Object,
     default: () => ({})
   },
-  nodeReviewsMap: {
-    type: Object,
-    default: () => ({})
-  },
   nodeExecutionStatusMap: {
     type: Object,
     default: () => ({})
@@ -117,7 +111,6 @@ const emit = defineEmits([
   'note-click',
   'link-click',
   'image-click',
-  'review-click',
   'toggle-collapse',
   'box-select',
   'box-select-preview',
@@ -193,10 +186,6 @@ function emitLinkClick(node) {
 
 function emitImageClick(node) {
   emit('image-click', node)
-}
-
-function emitReviewClick(node) {
-  emit('review-click', node)
 }
 
 function emitToggleCollapse(node) {
@@ -399,6 +388,17 @@ watch(
     window.requestAnimationFrame(emitViewportChange)
   }
 )
+
+function scrollTo(left, top) {
+  if (!scrollRef.value) {
+    return
+  }
+  scrollRef.value.scrollLeft = left
+  scrollRef.value.scrollTop = top
+  emitViewportChange()
+}
+
+defineExpose({ scrollTo })
 
 onBeforeUnmount(() => {
   stopDragging()

@@ -4,13 +4,30 @@
       <div class="page-header-row">
         <div>
           <h1 class="page-title">执行工作台</h1>
-          <p class="page-desc">按任务目录查看分配给你的子任务，点击「进入执行」用思维导图标记用例执行状态。</p>
+          <p class="page-desc">展示全部测试任务目录与子任务，点击「进入执行」用思维导图标记用例执行状态。</p>
         </div>
         <div class="header-actions">
-          <span class="executor-label">执行人ID</span>
-          <el-input-number v-model="executorId" :min="1" />
           <el-button type="primary" :loading="loading" @click="loadDirectories">刷新任务</el-button>
         </div>
+      </div>
+
+      <div class="filter-bar">
+        <span class="filter-label">负责人</span>
+        <el-select v-model="filterOwnerId" size="small" clearable filterable placeholder="全部负责人" class="filter-select" @change="loadDirectories">
+          <el-option v-for="user in users" :key="user.user_id" :label="user.real_name || user.username" :value="user.user_id" />
+        </el-select>
+        <span class="filter-label">执行人</span>
+        <el-select v-model="filterAssigneeId" size="small" clearable filterable placeholder="全部执行人" class="filter-select" @change="loadDirectories">
+          <el-option v-for="user in users" :key="user.user_id" :label="user.real_name || user.username" :value="user.user_id" />
+        </el-select>
+        <span class="filter-label">状态</span>
+        <el-select v-model="filterStatus" size="small" clearable placeholder="全部状态" class="filter-select" @change="loadDirectories">
+          <el-option label="待执行" value="assigned" />
+          <el-option label="执行中" value="running" />
+          <el-option label="已完成" value="finished" />
+          <el-option label="已取消" value="cancelled" />
+          <el-option label="草稿" value="draft" />
+        </el-select>
       </div>
     </div>
 
@@ -67,29 +84,44 @@
 
 <script setup>
 import { onMounted, ref } from 'vue'
+import { listUsers } from '../api/auth'
 import { listSubtasks, listTaskDirectories } from '../api/task'
-import { getCurrentUserId } from '../utils/storage'
 import { showSuccess } from '../utils/message'
 
-const executorId = ref(getCurrentUserId())
 const loading = ref(false)
 const directories = ref([])
+const users = ref([])
+const filterOwnerId = ref(null)
+const filterAssigneeId = ref(null)
+const filterStatus = ref('')
+
+async function loadUsers() {
+  try {
+    users.value = (await listUsers()) || []
+  } catch {
+    users.value = []
+  }
+}
 
 async function loadDirectories() {
   loading.value = true
   try {
-    const result = await listTaskDirectories({ page: 1, page_size: 100 })
+    const params = { page: 1, page_size: 100 }
+    if (filterOwnerId.value) params.owner_id = filterOwnerId.value
+    if (filterAssigneeId.value) params.assignee_id = filterAssigneeId.value
+    if (filterStatus.value) params.status = filterStatus.value
+    const result = await listTaskDirectories(params)
     const dirs = result.items || []
-    // 并行加载每个目录的子任务（限定当前执行人）
+    // 并行加载每个目录下的全部子任务（所有人可见，携带筛选保持一致）
+    const subtaskParams = { page: 1, page_size: 100 }
+    if (filterOwnerId.value) subtaskParams.owner_id = filterOwnerId.value
+    if (filterAssigneeId.value) subtaskParams.executor_id = filterAssigneeId.value
+    if (filterStatus.value) subtaskParams.status = filterStatus.value
     const withSubtasks = await Promise.all(
       dirs.map(async dir => {
         let subtasks = []
         try {
-          const subResult = await listSubtasks(dir.task_id, {
-            page: 1,
-            page_size: 100,
-            executor_id: executorId.value
-          })
+          const subResult = await listSubtasks(dir.task_id, subtaskParams)
           subtasks = (subResult.items || []).map(item => ({
             ...item,
             dir_name: dir.task_name
@@ -121,7 +153,10 @@ function directoryStatusText(dir) {
   return '未开始'
 }
 
-onMounted(loadDirectories)
+onMounted(async () => {
+  await loadUsers()
+  loadDirectories()
+})
 </script>
 
 <style scoped>
@@ -144,10 +179,25 @@ onMounted(loadDirectories)
   gap: 8px;
 }
 
-.executor-label {
-  color: #475569;
-  font-weight: 700;
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
 }
+
+.filter-label {
+  color: #475569;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.filter-select {
+  width: 140px;
+  margin-right: 8px;
+}
+
 
 .directory-list {
   display: flex;

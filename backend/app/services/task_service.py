@@ -121,11 +121,33 @@ def list_tasks(
         .offset((page - 1) * page_size)
         .limit(page_size)
     )
+    tasks = list(db.scalars(statement).all())
+    owner_ids = {task.owner_id for task in tasks if task.owner_id}
+    name_map = _user_name_map(db, owner_ids)
+    items = []
+    for task in tasks:
+        items.append(
+            {
+                "task_id": task.task_id,
+                "parent_id": task.parent_id,
+                "task_name": task.task_name,
+                "owner_id": task.owner_id,
+                "owner_name": name_map.get(task.owner_id) if task.owner_id else None,
+                "description": task.description,
+                "status": task.status,
+                "start_time": task.start_time,
+                "end_time": task.end_time,
+                "created_by": task.created_by,
+                "updated_by": task.updated_by,
+                "created_at": task.created_at,
+                "updated_at": task.updated_at,
+            }
+        )
     return {
         "total": total,
         "page": page,
         "page_size": page_size,
-        "items": list(db.scalars(statement).all()),
+        "items": items,
     }
 
 
@@ -149,11 +171,17 @@ def get_task_detail(db: Session, task_id: int) -> dict:
     blocked_count = count_execution_status(db, task_id, "blocked")
     not_run_count = count_execution_status(db, task_id, "not_run")
 
+    owner_name = None
+    if task.owner_id:
+        owner_name = _user_name_map(db, {task.owner_id}).get(task.owner_id)
+
     return {
         "task_id": task.task_id,
         "task_name": task.task_name,
         "description": task.description,
         "status": task.status,
+        "owner_id": task.owner_id,
+        "owner_name": owner_name,
         "start_time": task.start_time,
         "end_time": task.end_time,
         "created_by": task.created_by,
@@ -425,7 +453,7 @@ def count_execution_status(db: Session, task_id: int, status: str) -> int:
 
 
 def enrich_executions(db: Session, executions: list[TestExecutionRecord]) -> list[dict]:
-    """给执行记录附带用例节点标题与优先级，提升前端可读性。"""
+    """给执行记录附带用例节点标题/优先级/执行人姓名，提升前端可读性。"""
     if not executions:
         return []
 
@@ -434,6 +462,9 @@ def enrich_executions(db: Session, executions: list[TestExecutionRecord]) -> lis
         db.scalars(select(TestCaseNode).where(TestCaseNode.node_id.in_(node_ids), TestCaseNode.is_deleted == 0)).all()
     )
     node_map = {node.node_id: node for node in nodes}
+
+    executor_ids = list({execution.executor_id for execution in executions if execution.executor_id})
+    executor_name_map = _user_name_map(db, set(executor_ids))
 
     result = []
     for execution in executions:
@@ -449,6 +480,7 @@ def enrich_executions(db: Session, executions: list[TestExecutionRecord]) -> lis
             "case_node_priority": snapshot.get("priority") or (node.priority if node else None),
             "case_node_deleted": case_node_deleted,
             "executor_id": execution.executor_id,
+            "executor_name": executor_name_map.get(execution.executor_id),
             "execution_status": execution.execution_status,
             "actual_result": execution.actual_result,
             "bug_description": execution.bug_description,
@@ -493,16 +525,46 @@ def list_task_directories(
     page: int,
     page_size: int,
     keyword: str | None = None,
+    owner_id: int | None = None,
+    assignee_id: int | None = None,
+    status: str | None = None,
 ) -> dict:
-    """任务目录列表：父任务（或独立单层任务），附子任务聚合统计。"""
+    """任务目录列表：父任务（或独立单层任务），附子任务聚合统计。
+
+    支持按子任务的负责人 / 执行人 / 状态筛选：只展示包含符合条件子任务的目录。
+    """
     # 目录 = parent_id 为空 或 本身是别人的父任务
-    sub_parent_ids = list(
-        db.scalars(select(TestTask.parent_id).where(TestTask.parent_id.is_not(None), TestTask.is_deleted == 0)).all()
-    )
-    conditions = [
-        TestTask.is_deleted == 0,
-        or_(TestTask.parent_id.is_(None), TestTask.task_id.in_(sub_parent_ids)),
-    ]
+    has_filter = owner_id is not None or assignee_id is not None or bool(status)
+    if has_filter:
+        # 先筛出符合条件的子任务，再反查其父目录。
+        sub_conditions = [TestTask.parent_id.is_not(None), TestTask.is_deleted == 0]
+        if owner_id is not None:
+            sub_conditions.append(TestTask.owner_id == owner_id)
+        if assignee_id is not None:
+            sub_conditions.append(
+                TestTask.task_id.in_(
+                    select(TestTaskAssignee.task_id).where(TestTaskAssignee.assignee_id == assignee_id)
+                )
+            )
+        if status:
+            sub_conditions.append(TestTask.status == status)
+        matched_subtasks = list(db.scalars(select(TestTask).where(*sub_conditions)).all())
+        matched_parent_ids = list({task.parent_id for task in matched_subtasks if task.parent_id})
+        if not matched_parent_ids:
+            return {"total": 0, "page": page, "page_size": page_size, "items": []}
+        subtasks_by_parent: dict[int, list[int]] = {}
+        for task in matched_subtasks:
+            if task.parent_id:
+                subtasks_by_parent.setdefault(task.parent_id, []).append(task.task_id)
+        conditions = [TestTask.is_deleted == 0, TestTask.task_id.in_(matched_parent_ids)]
+    else:
+        sub_parent_ids = list(
+            db.scalars(select(TestTask.parent_id).where(TestTask.parent_id.is_not(None), TestTask.is_deleted == 0)).all()
+        )
+        conditions = [
+            TestTask.is_deleted == 0,
+            or_(TestTask.parent_id.is_(None), TestTask.task_id.in_(sub_parent_ids)),
+        ]
     if keyword and keyword.strip():
         conditions.append(TestTask.task_name.like(f"%{keyword.strip()}%"))
 
@@ -524,7 +586,10 @@ def list_task_directories(
 
     items = []
     for directory in directories:
-        subtasks = _subtask_ids(db, directory.task_id)
+        if has_filter:
+            subtasks = subtasks_by_parent.get(directory.task_id, [])
+        else:
+            subtasks = _subtask_ids(db, directory.task_id)
         stats = _aggregate_subtask_stats(db, subtasks)
         items.append({
             "task_id": directory.task_id,
@@ -581,6 +646,8 @@ def list_subtasks(
     page: int,
     page_size: int,
     executor_id: int | None = None,
+    owner_id: int | None = None,
+    status: str | None = None,
 ) -> dict:
     """目录下的子任务列表，含各自执行统计与负责人/执行人姓名。"""
     parent = db.get(TestTask, parent_id)
@@ -592,6 +659,10 @@ def list_subtasks(
         conditions.append(TestTask.task_id.in_(
             select(TestTaskAssignee.task_id).where(TestTaskAssignee.assignee_id == executor_id)
         ))
+    if owner_id is not None:
+        conditions.append(TestTask.owner_id == owner_id)
+    if status:
+        conditions.append(TestTask.status == status)
 
     total = db.scalar(select(func.count()).select_from(TestTask).where(*conditions)) or 0
     subtasks = list(
@@ -657,7 +728,11 @@ def list_subtasks(
 
 
 def get_subtask_execution_tree(db: Session, task_id: int, executor_id: int) -> dict:
-    """子任务的用例树 + 当前执行人的执行状态映射，供思维导图执行页使用。"""
+    """子任务的用例树 + 执行状态映射，供思维导图执行页使用。
+
+    status_map 聚合该任务全部执行人的状态，任何登录用户都能看到完整执行进度；
+    但标记/认领仍只对当前用户自己的执行记录生效（后端 update_execution 校验 executor_id）。
+    """
     ensure_user_exists(db, executor_id)
     task = db.get(TestTask, task_id)
     if not task or task.is_deleted == 1:
@@ -693,10 +768,15 @@ def get_subtask_execution_tree(db: Session, task_id: int, executor_id: int) -> d
             tree.extend(roots)
 
     executions = list_task_executions(db, task_id)
-    my_executions = [item for item in executions if item["executor_id"] == executor_id]
-    status_map: dict[str, str] = {
-        str(item["case_node_id"]): item["execution_status"] for item in my_executions
-    }
+    # 聚合全部执行人的状态：任一执行人标记过即算该状态，未标记视为未执行。
+    status_map: dict[str, str] = {}
+    for item in executions:
+        key = str(item["case_node_id"])
+        status = item["execution_status"]
+        if status != "not_run":
+            status_map[key] = status
+        elif key not in status_map:
+            status_map[key] = "not_run"
 
     assignee = db.scalar(
         select(TestTaskAssignee).where(
@@ -705,6 +785,14 @@ def get_subtask_execution_tree(db: Session, task_id: int, executor_id: int) -> d
         )
     )
     assign_status = assignee.assign_status if assignee else "assigned"
+
+    # 返回任务全部执行人的姓名，供前端展示"执行人：小赵、小钱"。
+    all_assignee_ids = list(
+        db.scalars(
+            select(TestTaskAssignee.assignee_id).where(TestTaskAssignee.task_id == task_id)
+        ).all()
+    )
+    assignee_names = list(_user_name_map(db, set(all_assignee_ids)).values())
 
     parent_name = None
     if task.parent_id:
@@ -718,6 +806,8 @@ def get_subtask_execution_tree(db: Session, task_id: int, executor_id: int) -> d
         "parent_id": task.parent_id,
         "parent_name": parent_name,
         "assign_status": assign_status,
+        "assignee_ids": all_assignee_ids,
+        "assignee_names": assignee_names,
         "case_set_ids": case_set_ids,
         "tree": tree,
         "status_map": status_map,

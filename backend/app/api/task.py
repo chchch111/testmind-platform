@@ -60,22 +60,27 @@ def api_list_tasks(
 @router.get("/tasks/directories", response_model=TaskDirectoryPageOut)
 def api_list_task_directories(
     keyword: str | None = Query(default=None),
+    owner_id: int | None = Query(default=None),
+    assignee_id: int | None = Query(default=None),
+    status: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=10, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
-    return list_task_directories(db, page, page_size, keyword)
+    return list_task_directories(db, page, page_size, keyword, owner_id, assignee_id, status)
 
 
 @router.get("/tasks/{parent_id}/subtasks", response_model=SubtasksPageOut)
 def api_list_subtasks(
     parent_id: int,
     executor_id: int | None = Query(default=None),
+    owner_id: int | None = Query(default=None),
+    status: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=10, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
-    return list_subtasks(db, parent_id, page, page_size, executor_id)
+    return list_subtasks(db, parent_id, page, page_size, executor_id, owner_id, status)
 
 
 @router.get("/tasks/{task_id}/execution-tree", response_model=TaskTreeStatusOut)
