@@ -1,9 +1,9 @@
 <template>
   <div class="login-page">
     <div class="login-card">
-      <div class="login-brand">RAG思维导图测试用例平台</div>
+      <div class="login-brand">TestMind</div>
       <h1>系统登录</h1>
-      <p>基于大模型与RAG的思维导图测试用例管理平台，登录后可进入用例、知识库、AI生成和任务管理模块。</p>
+      <p>智能测试用例全生命周期管理平台，基于大模型与RAG，覆盖用例设计、知识检索、AI生成、任务执行与质量分析。</p>
 
       <el-form label-position="top" @keyup.enter="handleLogin">
         <el-form-item label="用户名">

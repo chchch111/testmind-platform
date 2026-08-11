@@ -3,7 +3,7 @@
     <div class="page-card">
       <h1 class="page-title">系统首页</h1>
       <p class="page-desc">
-        本平台用于管理思维导图式测试用例，支持XMind导入导出、RAG知识库、DeepSeek-v4-flash自动生成测试用例和测试任务执行同步。
+        TestMind提供测试用例全生命周期管理：以思维导图可视化用例设计，支持XMind导入导出、RAG知识库检索、大模型自动生成用例，并覆盖测试任务分发、执行与质量分析。
       </p>
     </div>
 

@@ -2,8 +2,8 @@
   <el-container class="app-shell">
     <el-aside width="240px" class="app-aside">
       <div class="brand">
-        <div class="brand-title">RAG测试用例平台</div>
-        <div class="brand-subtitle">智能测试用例管理平台</div>
+        <div class="brand-title">TestMind</div>
+        <div class="brand-subtitle">智能测试用例全生命周期管理平台</div>
       </div>
       <el-menu router :default-active="$route.path" class="side-menu">
         <el-menu-item index="/dashboard">首页概览</el-menu-item>
@@ -20,7 +20,7 @@
       <el-header class="app-header">
         <div>
           <div class="header-title">{{ $route.meta.title || '首页' }}</div>
-          <div class="header-desc">基于大模型与RAG的思维导图测试用例自动生成与管理平台</div>
+          <div class="header-desc">基于大模型与RAG的智能测试用例全生命周期管理平台</div>
         </div>
         <div class="user-box">
           <div class="user-info">

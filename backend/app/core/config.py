@@ -21,7 +21,7 @@ def _resolve_storage_path(value: str, default_relative: str) -> str:
 class Settings(BaseSettings):
     """统一读取 .env 配置，避免把密码、API Key 写死在代码里。"""
 
-    app_name: str = "RAG思维导图测试用例平台"
+    app_name: str = "TestMind"
     app_env: str = "dev"
     app_host: str = "127.0.0.1"
     app_port: int = 8000

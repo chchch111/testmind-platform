@@ -19,7 +19,7 @@ from app.core.handlers import register_exception_handlers
 # 后续所有接口都会挂载到这个 app 上。
 app = FastAPI(
     title=settings.app_name,
-    description="基于大模型与RAG的思维导图测试用例自动生成与管理平台",
+    description="基于大模型与RAG的智能测试用例全生命周期管理平台",
     version="0.1.0",
 )
 
@@ -53,7 +53,7 @@ app.include_router(ai_router, dependencies=[Depends(get_current_active_user)])
 def root():
     """项目首页测试接口。"""
     return {
-        "message": "RAG思维导图测试用例平台后端启动成功",
+        "message": "TestMind后端启动成功",
         "app_name": settings.app_name,
         "env": settings.app_env,
     }

@@ -46,7 +46,7 @@ router.beforeEach(to => {
 })
 
 router.afterEach(to => {
-  document.title = `${to.meta.title || '首页'} - RAG思维导图测试用例平台`
+  document.title = `${to.meta.title || '首页'} - TestMind`
 })
 
 export default router
