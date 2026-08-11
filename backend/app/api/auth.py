@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_active_user
@@ -24,6 +25,22 @@ def api_login(data: LoginRequest, db: Session = Depends(get_db)):
 @router.get("/me", response_model=UserInfoOut)
 def api_get_me(current_user: User = Depends(get_current_active_user)):
     return to_user_info(current_user)
+
+
+@router.get("/users", response_model=list[UserInfoOut])
+def api_list_users(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """所有登录用户可用的用户列表，用于任务负责人/执行人下拉选择。"""
+    users = list(
+        db.scalars(
+            select(User)
+            .where(User.is_deleted == 0, User.is_active == 1)
+            .order_by(User.user_id.asc())
+        ).all()
+    )
+    return [to_user_info(user) for user in users]
 
 
 @router.post("/logout")

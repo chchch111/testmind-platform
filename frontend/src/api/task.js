@@ -20,10 +20,6 @@ export function getTaskReport(taskId) {
   return request.get(`/api/tasks/${taskId}/report`)
 }
 
-export function getExecutorTasks(executorId) {
-  return request.get(`/api/executors/${executorId}/tasks`)
-}
-
 export function listTaskDirectories(params = {}) {
   return request.get('/api/tasks/directories', { params })
 }

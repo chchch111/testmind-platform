@@ -3,7 +3,7 @@
     <el-aside width="240px" class="app-aside">
       <div class="brand">
         <div class="brand-title">RAG测试用例平台</div>
-        <div class="brand-subtitle">毕业设计演示系统</div>
+        <div class="brand-subtitle">智能测试用例管理平台</div>
       </div>
       <el-menu router :default-active="$route.path" class="side-menu">
         <el-menu-item index="/dashboard">首页概览</el-menu-item>

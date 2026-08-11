@@ -54,8 +54,9 @@
           <el-progress :percentage="progressPercent" :stroke-width="14" />
 
           <el-descriptions :column="2" border>
-            <el-descriptions-item label="创建人ID">{{ task.created_by }}</el-descriptions-item>
-            <el-descriptions-item label="更新人ID">{{ task.updated_by || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="负责人">{{ task.owner_name || '未设置' }}</el-descriptions-item>
+            <el-descriptions-item label="创建人">{{ userName(task.created_by) }}</el-descriptions-item>
+            <el-descriptions-item label="更新人">{{ task.updated_by ? userName(task.updated_by) : '-' }}</el-descriptions-item>
             <el-descriptions-item label="开始时间">{{ formatDateTime(task.start_time) }}</el-descriptions-item>
             <el-descriptions-item label="结束时间">{{ formatDateTime(task.end_time) }}</el-descriptions-item>
             <el-descriptions-item label="创建时间">{{ formatDateTime(task.created_at) }}</el-descriptions-item>
@@ -69,7 +70,7 @@
             </div>
             <div>
               <span class="section-label">执行人</span>
-              <el-tag v-for="assigneeId in task.assignee_ids" :key="assigneeId" type="success">用户 {{ assigneeId }}</el-tag>
+              <el-tag v-for="assigneeId in task.assignee_ids" :key="assigneeId" type="success">{{ userName(assigneeId) }}</el-tag>
             </div>
           </div>
         </div>
@@ -215,6 +216,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { cancelTask, deleteTask, getTaskDetail, getTaskReport, listTaskExecutions, updateExecution } from '../api/task'
+import { listUsers } from '../api/auth'
 import { EXECUTION_STATUS_TEXT, STATUS_TEXT } from '../utils/constants'
 import { confirmAction, showSuccess, showWarning } from '../utils/message'
 
@@ -228,6 +230,7 @@ const reportVisible = ref(false)
 const report = ref(null)
 const task = ref(null)
 const executions = ref([])
+const users = ref([])
 const executionDialogVisible = ref(false)
 const activeExecution = ref(null)
 const filters = reactive({
@@ -275,6 +278,19 @@ async function loadDetail() {
   } finally {
     loading.value = false
   }
+}
+
+async function loadUsers() {
+  try {
+    users.value = await listUsers()
+  } catch {
+    users.value = []
+  }
+}
+
+function userName(userId) {
+  const user = users.value.find(item => item.user_id === userId)
+  return user ? (user.real_name || user.username) : `用户${userId}`
 }
 
 async function openReport() {
@@ -403,7 +419,10 @@ function formatDateTime(value) {
   return String(value).replace('T', ' ').slice(0, 19)
 }
 
-onMounted(loadDetail)
+onMounted(() => {
+  loadDetail()
+  loadUsers()
+})
 </script>
 
 <style scoped>

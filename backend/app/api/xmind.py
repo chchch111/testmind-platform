@@ -21,20 +21,6 @@ def api_import_xmind(
     return import_xmind_file(db, file, current_user.user_id)
 
 
-@router.get("/export/{case_set_id}")
-def api_export_xmind(
-    case_set_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
-):
-    export_path = export_case_set_to_xmind(db, case_set_id, current_user.user_id)
-    return FileResponse(
-        path=export_path,
-        filename=export_path.name,
-        media_type="application/vnd.xmind.workbook",
-    )
-
-
 @router.post("/export/{case_set_id}")
 def api_export_xmind_with_tags(
     case_set_id: int,

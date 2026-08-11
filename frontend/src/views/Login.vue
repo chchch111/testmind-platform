@@ -3,7 +3,7 @@
     <div class="login-card">
       <div class="login-brand">RAG思维导图测试用例平台</div>
       <h1>系统登录</h1>
-      <p>毕业设计演示系统，登录后可进入用例、知识库、AI生成和任务管理模块。</p>
+      <p>基于大模型与RAG的思维导图测试用例管理平台，登录后可进入用例、知识库、AI生成和任务管理模块。</p>
 
       <el-form label-position="top" @keyup.enter="handleLogin">
         <el-form-item label="用户名">
@@ -14,7 +14,6 @@
         </el-form-item>
       </el-form>
 
-      <el-alert class="demo-account" title="开发演示账号：admin / admin123456（仅用于本地演示）" type="info" :closable="false" show-icon />
       <el-button class="login-button" type="primary" size="large" :loading="loggingIn" @click="handleLogin">登录系统</el-button>
     </div>
   </div>
@@ -88,10 +87,6 @@ async function handleLogin() {
   margin: 0 0 22px;
   color: #64748b;
   line-height: 1.7;
-}
-
-.demo-account {
-  margin: 4px 0 18px;
 }
 
 .login-button {

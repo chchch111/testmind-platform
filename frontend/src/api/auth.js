@@ -8,6 +8,10 @@ export function getCurrentUserProfile() {
   return request.get('/api/auth/me')
 }
 
+export function listUsers() {
+  return request.get('/api/auth/users')
+}
+
 export function logout() {
   return request.post('/api/auth/logout')
 }

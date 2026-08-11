@@ -34,6 +34,9 @@
             <el-table :data="dir.subtasks" border size="small" empty-text="该目录下还没有子任务，点击「添加子任务」创建">
               <el-table-column prop="task_id" label="ID" width="80" />
               <el-table-column prop="task_name" label="子任务名称" min-width="200" show-overflow-tooltip />
+              <el-table-column label="负责人" width="130" show-overflow-tooltip>
+                <template #default="{ row }">{{ row.owner_name || '-' }}</template>
+              </el-table-column>
               <el-table-column label="执行人" min-width="140" show-overflow-tooltip>
                 <template #default="{ row }">{{ (row.assignee_names || []).join('、') || '-' }}</template>
               </el-table-column>
@@ -71,7 +74,9 @@
           <el-input v-model="dirForm.task_name" placeholder="例如：摄像头功能回归测试" />
         </el-form-item>
         <el-form-item label="负责人">
-          <el-input-number v-model="dirForm.owner_id" :min="1" />
+          <el-select v-model="dirForm.owner_id" filterable placeholder="选择负责人" class="wide-select">
+            <el-option v-for="user in users" :key="user.user_id" :label="userLabel(user)" :value="user.user_id" />
+          </el-select>
         </el-form-item>
         <el-form-item label="描述">
           <el-input v-model="dirForm.description" type="textarea" :rows="3" placeholder="可选" />
@@ -102,16 +107,21 @@
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="执行人ID">
+        <el-form-item label="负责人">
+          <el-select v-model="subtaskOwnerId" filterable placeholder="选择子任务负责人" class="wide-select">
+            <el-option v-for="user in users" :key="user.user_id" :label="userLabel(user)" :value="user.user_id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="执行人">
           <el-select
             v-model="assigneeInputValues"
             multiple
             filterable
-            allow-create
-            default-first-option
-            placeholder="输入执行人ID后回车，例如 1、2、3"
+            placeholder="选择一位或多位执行人"
             class="wide-select"
-          />
+          >
+            <el-option v-for="user in users" :key="user.user_id" :label="userLabel(user)" :value="String(user.user_id)" />
+          </el-select>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -125,6 +135,7 @@
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
 import { listCaseSets } from '../api/case'
+import { listUsers } from '../api/auth'
 import { cancelTask, createTask, deleteTask, listSubtasks, listTaskDirectories } from '../api/task'
 import { STATUS_TEXT } from '../utils/constants'
 import { confirmAction, showSuccess, showWarning } from '../utils/message'
@@ -136,8 +147,10 @@ const createDirDialogVisible = ref(false)
 const addSubtaskDialogVisible = ref(false)
 const directories = ref([])
 const caseSets = ref([])
+const users = ref([])
 const currentDir = ref(null)
 const assigneeInputValues = ref([String(getCurrentUserId())])
+const subtaskOwnerId = ref(getCurrentUserId())
 
 const dirForm = reactive({
   task_name: '',
@@ -178,6 +191,18 @@ async function loadCaseSets() {
   caseSets.value = result.items || []
 }
 
+async function loadUsers() {
+  try {
+    users.value = await listUsers()
+  } catch {
+    users.value = []
+  }
+}
+
+function userLabel(user) {
+  return `#${user.user_id} ${user.real_name || user.username}（${user.role_code}）`
+}
+
 function openCreateDirDialog() {
   dirForm.task_name = ''
   dirForm.description = ''
@@ -213,7 +238,8 @@ async function openAddSubtaskDialog(dir) {
   currentDir.value = dir
   subtaskForm.task_name = ''
   subtaskForm.case_set_ids = []
-  assigneeInputValues.value = [String(getCurrentUserId())]
+  assigneeInputValues.value = []
+  subtaskOwnerId.value = dir.owner_id || getCurrentUserId()
   await loadCaseSets()
   addSubtaskDialogVisible.value = true
 }
@@ -238,7 +264,7 @@ async function handleCreateSubtask() {
     const created = await createTask({
       task_name: subtaskForm.task_name.trim(),
       parent_id: currentDir.value.task_id,
-      owner_id: dirForm.owner_id,
+      owner_id: subtaskOwnerId.value,
       case_set_ids: subtaskForm.case_set_ids,
       assignee_ids: assigneeIds,
       created_by: getCurrentUserId()
@@ -291,6 +317,7 @@ function taskStatusTagType(status) {
 onMounted(() => {
   loadDirectories()
   loadCaseSets()
+  loadUsers()
 })
 </script>
 

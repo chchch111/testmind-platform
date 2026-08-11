@@ -31,10 +31,6 @@ export function createCaseNode(data) {
   return request.post('/api/case-nodes', data)
 }
 
-export function getCaseNode(nodeId) {
-  return request.get(`/api/case-nodes/${nodeId}`)
-}
-
 export function updateCaseNode(nodeId, data) {
   return request.put(`/api/case-nodes/${nodeId}`, data)
 }

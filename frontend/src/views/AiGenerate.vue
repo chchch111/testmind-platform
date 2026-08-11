@@ -13,10 +13,10 @@
     </div>
 
     <el-row :gutter="18">
-      <el-col :span="9">
+      <el-col :span="8">
         <div class="page-card form-card">
           <h2>生成参数</h2>
-          <p class="section-desc">建议先在知识库管理页补充资料并构建索引，否则后端会提示“RAG没有检索到可用上下文”。</p>
+          <p class="section-desc">选择知识库并描述测试需求，系统先检索知识片段，再调用 DeepSeek 生成用例。</p>
 
           <el-form label-position="top">
             <el-form-item label="知识库">
@@ -29,6 +29,22 @@
                 />
               </el-select>
             </el-form-item>
+
+            <div v-if="selectedKnowledgeBase" class="kb-summary">
+              <div class="kb-title">当前知识库</div>
+              <div class="kb-name-line">{{ selectedKnowledgeBase.name }}</div>
+              <div class="kb-meta">产品：{{ selectedKnowledgeBase.product_type || '未填写' }} / 模块：{{ selectedKnowledgeBase.hardware_module || '未填写' }}</div>
+              <div class="kb-stats">
+                <span class="kb-stat-item">来源 {{ selectedKnowledgeBase.source_count || 0 }}</span>
+                <span class="kb-stat-item">切片 {{ selectedKnowledgeBase.chunk_count || 0 }}</span>
+                <el-tag size="small" :type="indexStatusTagType(selectedKnowledgeBase.index_status)">
+                  {{ INDEX_STATUS_TEXT[selectedKnowledgeBase.index_status] || selectedKnowledgeBase.index_status }}
+                </el-tag>
+              </div>
+              <div v-if="selectedKnowledgeBase.index_status !== 'active'" class="kb-warn">
+                该知识库尚未构建索引，生成时可能检索不到上下文，请先到知识库管理页构建。
+              </div>
+            </div>
 
             <el-form-item label="测试需求">
               <el-input
@@ -55,52 +71,31 @@
             </el-row>
           </el-form>
 
-          <div v-if="selectedKnowledgeBase" class="kb-summary">
-            <div class="kb-title">当前知识库</div>
-            <div>{{ selectedKnowledgeBase.name }}</div>
-            <div class="kb-meta">产品：{{ selectedKnowledgeBase.product_type || '未填写' }} / 模块：{{ selectedKnowledgeBase.hardware_module || '未填写' }}</div>
-          </div>
-
           <el-button class="generate-button" type="primary" size="large" :loading="generating" @click="handleGenerate">
             {{ generating ? '正在生成...' : '开始AI生成' }}
           </el-button>
         </div>
       </el-col>
 
-      <el-col :span="15">
-        <div class="page-card stage-card">
-          <div class="section-header">
-            <div>
-              <h2>生成阶段</h2>
-              <p class="section-desc">用于答辩演示：清楚展示从RAG检索到用例入库的处理链路。</p>
-            </div>
-            <el-tag :type="generating ? 'warning' : result ? 'success' : 'info'" size="large">{{ stageStatusText }}</el-tag>
-          </div>
-
-          <el-steps :active="activeStage" finish-status="success" process-status="process" align-center>
-            <el-step v-for="stage in stages" :key="stage.title" :title="stage.title" :description="stage.desc" />
-          </el-steps>
-
-          <el-alert v-if="generating" class="stage-alert" :title="currentStageText" type="info" show-icon :closable="false">
-            <template #default>
-              <div class="stage-hint">上方步骤为处理链路示意，实际进度以后端返回结果为准。</div>
-            </template>
-          </el-alert>
-          <el-alert v-else-if="result" class="stage-alert" title="生成完成：可以在下方预览结果，也可以跳转到用例集详情页查看脑图。" type="success" show-icon :closable="false" />
-          <el-alert v-else class="stage-alert" title="等待输入需求并开始生成。" type="info" show-icon :closable="false" />
-        </div>
-
+      <el-col :span="16">
         <div class="page-card preview-card">
           <div class="section-header">
             <div>
-              <h2>结果预览</h2>
-              <p class="section-desc">生成的JSON会按目录/用例树展示，自动入库后可直接跳转到思维导图编辑器。</p>
+              <h2>生成结果</h2>
+              <p class="section-desc">生成的 JSON 会按目录/用例树展示，自动入库后可跳转到思维导图编辑器。</p>
             </div>
             <div class="preview-actions">
               <el-button :disabled="!result" @click="copyGeneratedText">复制原始JSON</el-button>
               <el-button type="primary" :disabled="!lastCaseSetId" @click="openGeneratedCaseSet">打开脑图</el-button>
             </div>
           </div>
+
+          <div class="status-bar" :class="`status-${stageStatusType}`">
+            <span class="status-dot" />
+            <span class="status-text">{{ statusBarText }}</span>
+            <span v-if="generating" class="status-detail">{{ currentStageText }}</span>
+          </div>
+
           <AiResultPreview :result="result" />
         </div>
       </el-col>
@@ -189,6 +184,7 @@ import { useRouter } from 'vue-router'
 import AiResultPreview from '../components/AiResultPreview.vue'
 import { generateCaseSet, listGenerationRecords } from '../api/ai'
 import { listKnowledgeBases } from '../api/rag'
+import { INDEX_STATUS_TEXT } from '../utils/constants'
 import { formatDateTime } from '../utils/format'
 import { showSuccess, showWarning } from '../utils/message'
 import { getCurrentUserId } from '../utils/storage'
@@ -201,17 +197,8 @@ const generating = ref(false)
 const recordLoading = ref(false)
 const recordDetailVisible = ref(false)
 const activeRecord = ref(null)
-const activeStage = ref(0)
-const currentStageText = ref('等待开始生成')
+const currentStageText = ref('等待输入需求并开始生成')
 let stageTimer = null
-
-const stages = [
-  { title: '选择知识库', desc: '确定检索范围' },
-  { title: 'RAG检索', desc: '召回相似知识' },
-  { title: 'AI生成', desc: '输出树形JSON' },
-  { title: '结果入库', desc: '保存为用例集' },
-  { title: '脑图预览', desc: '跳转编辑器' }
-]
 
 const form = reactive({
   knowledge_base_id: null,
@@ -222,12 +209,22 @@ const form = reactive({
 
 const selectedKnowledgeBase = computed(() => knowledgeBases.value.find(item => item.knowledge_base_id === form.knowledge_base_id) || null)
 const lastCaseSetId = computed(() => result.value?.case_set_id || null)
-const stageStatusText = computed(() => {
-  if (generating.value) {
-    return '生成中'
-  }
-  return result.value ? '已完成' : '待开始'
+const stageStatusType = computed(() => {
+  if (generating.value) return 'running'
+  return result.value ? 'success' : 'idle'
 })
+const statusBarText = computed(() => {
+  if (generating.value) return '正在生成测试用例'
+  if (result.value) {
+    return result.value.case_set_id ? '生成完成，已保存为草稿用例集，可跳转脑图查看' : '生成完成，结果已在下方展示'
+  }
+  return '等待开始生成'
+})
+
+function indexStatusTagType(status) {
+  const map = { none: 'info', rebuilding: 'warning', active: 'success', deleted: 'danger' }
+  return map[status] || 'info'
+}
 
 async function loadInitialData() {
   await Promise.all([loadKnowledgeBases(), loadRecords()])
@@ -271,7 +268,6 @@ async function handleGenerate() {
       save_to_case_set: form.save_to_case_set
     })
     result.value = data
-    activeStage.value = stages.length
     currentStageText.value = '生成完成，结果已返回前端'
     showSuccess(data.case_set_id ? `AI生成成功，已保存为草稿用例集 #${data.case_set_id}，可在用例集管理中审阅并发布` : 'AI生成成功，结果已返回预览')
     await loadRecords()
@@ -283,12 +279,11 @@ async function handleGenerate() {
 
 function startStageProgress() {
   // 说明：后端当前是单次同步请求，无法返回真实阶段进度。
-  // 这里仅展示处理链路示意，完成后跳到完成态。
+  // 这里仅展示处理中的状态文案，完成后回到完成态。
   const texts = [
     '正在调用后端生成服务（RAG检索 → AI生成 → 结果入库）...',
     '后端处理中，请耐心等待...'
   ]
-  activeStage.value = 1
   currentStageText.value = texts[0]
   let index = 0
   stageTimer = window.setInterval(() => {
@@ -339,7 +334,7 @@ function previewRecord(row) {
     generated_json: row.generated_json || { case_set_name: '无可预览内容', nodes: [] },
     generated_text: row.generated_json ? JSON.stringify(row.generated_json, null, 2) : ''
   }
-  activeStage.value = row.generation_status === 'success' ? stages.length : 0
+  currentStageText.value = row.generation_status === 'success' ? '生成完成，结果已返回前端' : '生成失败，请查看记录详情'
   window.scrollTo({ top: 260, behavior: 'smooth' })
 }
 
@@ -414,10 +409,38 @@ onBeforeUnmount(stopStageProgress)
   font-weight: 700;
 }
 
+.kb-name-line {
+  font-weight: 600;
+}
+
 .kb-meta {
   margin-top: 6px;
   color: #64748b;
   font-size: 13px;
+}
+
+.kb-stats {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.kb-stat-item {
+  color: #475569;
+  font-size: 13px;
+}
+
+.kb-warn {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #92400e;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .generate-button {
@@ -425,18 +448,46 @@ onBeforeUnmount(stopStageProgress)
   margin-top: 18px;
 }
 
-.stage-card {
-  margin-bottom: 18px;
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  border-radius: 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
 }
 
-.stage-alert {
-  margin-top: 22px;
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #94a3b8;
 }
 
-.stage-hint {
-  margin-top: 6px;
-  color: #94a3b8;
-  font-size: 12px;
+.status-running .status-dot {
+  background: #f59e0b;
+  animation: status-pulse 1s ease-in-out infinite;
+}
+
+.status-success .status-dot {
+  background: #16a34a;
+}
+
+.status-text {
+  color: #1e293b;
+  font-weight: 700;
+}
+
+.status-detail {
+  color: #64748b;
+  font-size: 13px;
+}
+
+@keyframes status-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
 }
 
 .preview-card {

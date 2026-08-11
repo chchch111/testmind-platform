@@ -92,10 +92,6 @@ class CaseSetPageOut(BaseModel):
     items: list[CaseSetOut]
 
 
-class DeleteRequest(BaseModel):
-    pass
-
-
 class CaseNodeVersionOut(BaseModel):
     version_id: int
     node_id: int

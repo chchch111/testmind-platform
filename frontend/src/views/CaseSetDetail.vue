@@ -21,13 +21,12 @@
     <div class="editor-tabs page-card">
       <div class="tab-row">
         <el-tabs v-model="activeTab" class="editor-tab">
-          <el-tab-pane label="思路" name="mind" />
-          <el-tab-pane label="外观" name="style" />
+          <el-tab-pane label="工具栏" name="tools" />
         </el-tabs>
         <div class="collapse-tip">收起</div>
       </div>
 
-      <div v-if="activeTab === 'mind'" class="toolbar-grid">
+      <div class="toolbar-grid">
         <div class="toolbar-block">
           <el-button text :disabled="!undoStack.length" @click="undoLastAction">撤销</el-button>
           <el-button text :disabled="!redoStack.length" @click="redoLastAction">重做</el-button>
@@ -70,17 +69,7 @@
             </el-select>
           </div>
         </div>
-      </div>
 
-      <div v-else class="toolbar-grid style-toolbar-grid">
-        <div class="toolbar-block style-block">
-          <span class="style-label">主题</span>
-          <el-radio-group v-model="appearanceForm.theme" size="small" @change="applyAppearanceTheme">
-            <el-radio-button v-for="theme in appearanceThemes" :key="theme.name" :label="theme.name">
-              {{ theme.label }}
-            </el-radio-button>
-          </el-radio-group>
-        </div>
         <div class="toolbar-block style-block">
           <span class="style-label">连线颜色</span>
           <el-color-picker v-model="appearanceForm.connectorColor" size="small" @change="saveAppearanceSettings" />
@@ -137,6 +126,7 @@
       </div>
 
       <MindMapCanvas
+        ref="mindMapCanvasRef"
         :tree-data="filteredTreeData"
         :selected-node-id="selectedNode?.node_id"
         :selected-node-ids="selectedNodeIds"
@@ -145,7 +135,6 @@
         :node-notes-map="nodeNotesMap"
         :node-links-map="nodeLinksMap"
         :node-images-map="nodeImagesMap"
-        :node-reviews-map="nodeReviewsMap"
         :collapsed-node-ids="collapsedNodeIds"
         :appearance="appearanceConfig"
         :zoom="zoom"
@@ -157,7 +146,6 @@
         @note-click="openNoteDialog"
         @link-click="openLinkDialog"
         @image-click="openImageDialog"
-        @review-click="openReviewDialog"
         @toggle-collapse="toggleNodeCollapse"
         @box-select="handleBoxSelect"
         @box-select-preview="handleBoxSelectPreview"
@@ -180,7 +168,7 @@
         <el-button circle size="small" title="居中" @click="resetZoom">中</el-button>
         <div class="zoom-value">{{ Math.round(zoom * 100) }}%</div>
       </div>
-      <div class="mini-map" title="当前脑图缩略视图">
+      <div class="mini-map" title="拖动框选可移动视野，点击可定位">
         <svg v-if="miniMapLayout.nodes.length" class="mini-map-svg" viewBox="0 0 118 88" aria-label="脑图迷你地图">
           <circle
             v-for="node in miniMapLayout.nodes"
@@ -192,35 +180,46 @@
           />
         </svg>
         <div v-else class="mini-map-empty">暂无节点</div>
-        <div class="mini-map-window" :style="miniMapWindowStyle" />
+        <div
+          class="mini-map-window"
+          :style="miniMapWindowStyle"
+          @mousedown.prevent="startMiniMapPan"
+        />
       </div>
       <div v-if="contextMenuVisible" class="quick-node-menu" :style="contextMenuStyle" @click.stop>
-        <div class="quick-ring" />
+        <svg class="quick-ring-track" viewBox="0 0 300 400" aria-hidden="true">
+          <circle
+            cx="150" cy="195" r="105"
+            fill="none"
+            stroke="rgba(71, 85, 105, 0.22)"
+            stroke-width="20"
+          />
+        </svg>
+        <!-- 环心：主操作「编辑」（红色，保留在圆环中央） -->
         <el-button class="quick-button primary" circle @click="runContextAction(openEditNode)">
           <span class="quick-text">编辑</span>
+        </el-button>
+        <!-- 环上 60° 等角均匀分布的次要操作 -->
+        <el-button class="quick-button" circle :disabled="!canMoveSelectedNode('up')" @click="runContextAction(() => moveSelectedNode('up'))">
+          <span class="quick-text">前移</span>
         </el-button>
         <el-button class="quick-button" circle @click="runContextAction(openCreateChild)">
           <span class="quick-text">下级</span>
         </el-button>
-        <el-button class="quick-button" circle @click="runContextAction(openSiblingNode)">
-          <span class="quick-text">同级</span>
-        </el-button>
         <el-button class="quick-button" circle @click="runContextAction(handleDeleteNode)">
           <span class="quick-text">删除</span>
         </el-button>
-        <el-button class="quick-button" circle :disabled="!selectedNodeParent" @click="runContextAction(() => selectRelativeNode('parent'))">
-          <span class="quick-text">上级</span>
-        </el-button>
-        <el-button class="quick-button" circle :disabled="!canMoveSelectedNode('up')" @click="runContextAction(() => moveSelectedNode('up'))">
-          <span class="quick-text">前移</span>
+        <el-button class="quick-button" circle @click="runContextAction(openSiblingNode)">
+          <span class="quick-text">同级</span>
         </el-button>
         <el-button class="quick-button" circle :disabled="!canMoveSelectedNode('down')" @click="runContextAction(() => moveSelectedNode('down'))">
           <span class="quick-text">后移</span>
         </el-button>
+        <el-button class="quick-button" circle :disabled="!selectedNodeParent" @click="runContextAction(() => selectRelativeNode('parent'))">
+          <span class="quick-text">上级</span>
+        </el-button>
         <div class="quick-extra-actions">
           <el-button round @click="runContextAction(() => openNoteDialog(selectedNode))">备注</el-button>
-          <el-button round @click="runContextAction(() => openReviewDialog(selectedNode))">评审</el-button>
-          <el-button round @click="runContextAction(() => openAutomationDialog(selectedNode))">自动化</el-button>
         </div>
       </div>
       <el-button class="floating-save" type="primary" @click="handleSaveCanvas">保存</el-button>
@@ -358,49 +357,6 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="reviewDialogVisible" title="节点评审" width="560px">
-      <div v-if="reviewEditingNode" class="meta-dialog-body">
-        <div class="note-node-title">当前节点：{{ reviewEditingNode.title }}</div>
-        <el-input
-          v-model="reviewDraft"
-          type="textarea"
-          :rows="5"
-          maxlength="300"
-          show-word-limit
-          placeholder="请输入评审意见，例如：待补充边界条件"
-        />
-        <div v-if="currentNodeReview" class="meta-preview">
-          <div class="note-preview-title">当前评审意见</div>
-          <div class="note-preview-content">{{ currentNodeReview.text }}</div>
-          <small>评审人ID：{{ currentNodeReview.reviewer_id }}，更新时间：{{ currentNodeReview.updated_at }}</small>
-        </div>
-      </div>
-      <template #footer>
-        <el-button :disabled="!reviewEditingNode || !currentNodeReview" @click="clearNodeReview">删除评审</el-button>
-        <el-button @click="reviewDialogVisible = false">关闭</el-button>
-        <el-button type="primary" @click="saveNodeReview">保存评审</el-button>
-      </template>
-    </el-dialog>
-
-    <el-dialog v-model="automationDialogVisible" title="自动化脚本草稿" width="760px">
-      <div v-if="automationNode" class="automation-dialog-body">
-        <div class="note-node-title">当前用例：{{ automationNode.title }}</div>
-        <div class="automation-tools">
-          <el-radio-group v-model="automationTemplate" size="small" @change="refreshAutomationScript">
-            <el-radio-button label="pytest">Pytest</el-radio-button>
-            <el-radio-button label="selenium">Selenium</el-radio-button>
-            <el-radio-button label="manual">手工步骤</el-radio-button>
-          </el-radio-group>
-          <el-button size="small" @click="refreshAutomationScript">重新生成</el-button>
-        </div>
-        <el-input v-model="automationScript" type="textarea" :rows="18" spellcheck="false" />
-      </div>
-      <template #footer>
-        <el-button @click="automationDialogVisible = false">关闭</el-button>
-        <el-button type="primary" @click="copyAutomationScript">复制脚本</el-button>
-      </template>
-    </el-dialog>
-
     <el-dialog v-model="searchDialogVisible" title="查找节点" width="520px">
       <el-input v-model="searchKeyword" placeholder="输入节点标题关键字" clearable @keyup.enter="selectSearchResult(0)" />
       <div class="search-result-list">
@@ -425,7 +381,7 @@
         </el-table-column>
         <el-table-column label="内容" min-width="220">
           <template #default="{ row }">
-            标签 {{ Object.keys(row.data_json?.nodeTagsMap || {}).length }} 个节点，备注 {{ Object.keys(row.data_json?.nodeNotesMap || {}).length }} 个节点，评审 {{ Object.keys(row.data_json?.nodeReviewsMap || {}).length }} 个节点
+            标签 {{ Object.keys(row.data_json?.nodeTagsMap || {}).length }} 个节点，备注 {{ Object.keys(row.data_json?.nodeNotesMap || {}).length }} 个节点
           </template>
         </el-table-column>
         <el-table-column label="操作" width="190">
@@ -487,7 +443,7 @@ const customTagStorageKey = `rag_mindmap_custom_tags_${caseSetId}`
 const collapsedNodeStorageKey = `rag_mindmap_collapsed_nodes_${caseSetId}`
 const appearanceStorageKey = `rag_mindmap_appearance_${caseSetId}`
 let remoteSaveTimer = null
-const activeTab = ref('mind')
+const activeTab = ref('tools')
 const labelTab = ref('system')
 const customTagValue = ref('')
 const customToolbarTags = ref([])
@@ -500,11 +456,11 @@ const nodeTagsMap = reactive({})
 const nodeNotesMap = reactive({})
 const nodeLinksMap = reactive({})
 const nodeImagesMap = reactive({})
-const nodeReviewsMap = reactive({})
 const collapsedNodeIds = ref([])
 const canvasSnapshots = ref([])
 const zoom = ref(1)
 const isMindmapViewportActive = ref(false)
+const mindMapCanvasRef = ref(null)
 const contextMenuVisible = ref(false)
 const contextMenuPosition = reactive({ x: 0, y: 0 })
 const viewportState = reactive({
@@ -526,17 +482,10 @@ const searchDialogVisible = ref(false)
 const noteDialogVisible = ref(false)
 const linkDialogVisible = ref(false)
 const imageDialogVisible = ref(false)
-const reviewDialogVisible = ref(false)
-const automationDialogVisible = ref(false)
 const noteEditingNode = ref(null)
 const linkEditingNode = ref(null)
 const imageEditingNode = ref(null)
-const reviewEditingNode = ref(null)
-const automationNode = ref(null)
-const automationTemplate = ref('pytest')
-const automationScript = ref('')
 const noteDraft = ref('')
-const reviewDraft = ref('')
 const linkForm = reactive({ title: '', url: '' })
 const imageForm = reactive({ title: '', url: '' })
 const caseReviewForm = reactive({ reviewerIds: [], dueAt: '', note: '' })
@@ -561,7 +510,6 @@ const nodeForm = reactive({
   change_note: ''
 })
 const appearanceForm = reactive({
-  theme: 'blue',
   rootColor: '#6ea4c8',
   nodeBorderColor: '#8db7d6',
   connectorColor: '#7faed0',
@@ -589,19 +537,11 @@ const businessToolbarTags = [
   { text: 'UI测试', color: '#c4b5fd' }
 ]
 
-const appearanceThemes = [
-  { name: 'blue', label: '蓝色', rootColor: '#6ea4c8', nodeBorderColor: '#8db7d6', connectorColor: '#7faed0' },
-  { name: 'green', label: '绿色', rootColor: '#16a34a', nodeBorderColor: '#86efac', connectorColor: '#22c55e' },
-  { name: 'purple', label: '紫色', rootColor: '#7c3aed', nodeBorderColor: '#c4b5fd', connectorColor: '#8b5cf6' },
-  { name: 'orange', label: '橙色', rootColor: '#f97316', nodeBorderColor: '#fdba74', connectorColor: '#fb923c' }
-]
-
 const visibleToolbarTags = computed(() => (labelTab.value === 'system' ? systemToolbarTags : businessToolbarTags.slice(0, 3)))
 const allToolbarTags = computed(() => [...systemToolbarTags, ...businessToolbarTags, ...customToolbarTags.value])
 const currentNodeNote = computed(() => String(nodeNotesMap[noteEditingNode.value?.node_id] || '').trim())
 const currentNodeLink = computed(() => nodeLinksMap[linkEditingNode.value?.node_id] || null)
 const currentNodeImage = computed(() => nodeImagesMap[imageEditingNode.value?.node_id] || null)
-const currentNodeReview = computed(() => nodeReviewsMap[reviewEditingNode.value?.node_id] || null)
 const selectedNodeParent = computed(() => (selectedNode.value ? findParentNode(treeData.value, selectedNode.value.node_id) : null))
 const selectedNodeHasChildren = computed(() => Boolean(selectedNode.value?.children?.length))
 const appearanceConfig = computed(() => ({ ...appearanceForm }))
@@ -667,9 +607,9 @@ const zoomDotStyle = computed(() => ({
   top: `${12 + (zoom.value - 0.6) * 75}px`
 }))
 
-const miniMapLayout = computed(() => buildMiniMapLayout(filteredTreeData.value))
+const miniMapLayout = computed(() => buildMiniMapLayout())
 const miniMapWindowStyle = computed(() => {
-  const bounds = getMiniMapBounds(filteredTreeData.value)
+  const bounds = getMiniMapBounds()
   if (!bounds) {
     return { left: '0px', top: '0px', width: '118px', height: '88px' }
   }
@@ -705,8 +645,8 @@ function handleViewportChange(payload) {
   Object.assign(viewportState, payload)
 }
 
-function buildMiniMapLayout(nodes) {
-  const bounds = getMiniMapBounds(nodes)
+function buildMiniMapLayout() {
+  const bounds = getMiniMapBounds()
   if (!bounds) {
     return { nodes: [] }
   }
@@ -727,9 +667,9 @@ function buildMiniMapLayout(nodes) {
   }
 }
 
-function getMiniMapBounds(nodes) {
+function getMiniMapBounds() {
   const nodeMetaMap = new Map()
-  collectMiniMapNodeMeta(nodes, nodeMetaMap)
+  collectMiniMapNodeMeta(filteredTreeData.value, nodeMetaMap)
   const visibleNodes = viewportState.nodes.filter(node => nodeMetaMap.has(node.id))
   if (!visibleNodes.length) {
     return null
@@ -755,6 +695,53 @@ function collectMiniMapNodeMeta(nodes, result) {
       collectMiniMapNodeMeta(node.children || [], result)
     }
   }
+}
+
+let miniMapDragging = false
+let miniMapDragStart = { x: 0, y: 0, scrollLeft: 0, scrollTop: 0 }
+
+function startMiniMapPan(event) {
+  if (!mindMapCanvasRef.value) {
+    return
+  }
+  const bounds = getMiniMapBounds()
+  if (!bounds) {
+    return
+  }
+  miniMapDragging = true
+  miniMapDragStart = {
+    x: event.clientX,
+    y: event.clientY,
+    scrollLeft: viewportState.scrollLeft,
+    scrollTop: viewportState.scrollTop
+  }
+  window.addEventListener('mousemove', handleMiniMapPan)
+  window.addEventListener('mouseup', stopMiniMapPan)
+}
+
+function handleMiniMapPan(event) {
+  if (!miniMapDragging || !mindMapCanvasRef.value) {
+    return
+  }
+  const bounds = getMiniMapBounds()
+  if (!bounds) {
+    return
+  }
+  const padding = 8
+  const mapWidth = 118 - padding * 2
+  const mapHeight = 88 - padding * 2
+  const dx = (event.clientX - miniMapDragStart.x) / mapWidth * bounds.width
+  const dy = (event.clientY - miniMapDragStart.y) / mapHeight * bounds.height
+  mindMapCanvasRef.value.scrollTo(miniMapDragStart.scrollLeft + dx, miniMapDragStart.scrollTop + dy)
+}
+
+function stopMiniMapPan() {
+  if (!miniMapDragging) {
+    return
+  }
+  miniMapDragging = false
+  window.removeEventListener('mousemove', handleMiniMapPan)
+  window.removeEventListener('mouseup', stopMiniMapPan)
 }
 
 function cloneTagsMap() {
@@ -834,11 +821,6 @@ function remapHistoryNodeId(oldNodeId, newNodeId) {
     nodeImagesMap[newKey] = nodeImagesMap[oldKey]
     delete nodeImagesMap[oldKey]
     saveNodeImages()
-  }
-  if (nodeReviewsMap[oldKey]) {
-    nodeReviewsMap[newKey] = nodeReviewsMap[oldKey]
-    delete nodeReviewsMap[oldKey]
-    saveNodeReviews()
   }
 }
 
@@ -1000,8 +982,8 @@ function openContextMenu(payload) {
   selectedNode.value = payload.node
   selectedNodeIds.value = [payload.node.node_id]
   detailDrawerVisible.value = false
-  contextMenuPosition.x = Math.max(16, Math.min(window.innerWidth - 320, payload.x - 150))
-  contextMenuPosition.y = Math.max(16, Math.min(window.innerHeight - 360, payload.y - 120))
+  contextMenuPosition.x = Math.max(16, Math.min(window.innerWidth - 330, payload.x - 165))
+  contextMenuPosition.y = Math.max(16, Math.min(window.innerHeight - 410, payload.y - 205))
   contextMenuVisible.value = true
 }
 
@@ -1104,11 +1086,6 @@ async function flushRemoteSave() {
       items.push({ node_id: Number(nodeId), meta_type: 'image', meta_value: image })
     }
   })
-  Object.entries(nodeReviewsMap).forEach(([nodeId, review]) => {
-    if (review?.text) {
-      items.push({ node_id: Number(nodeId), meta_type: 'review', meta_value: review })
-    }
-  })
   try {
     await saveCaseSetMetas(caseSetId, items)
   } catch {
@@ -1124,7 +1101,6 @@ async function loadNodeMetasFromServer() {
     Object.keys(nodeNotesMap).forEach(nodeId => delete nodeNotesMap[nodeId])
     Object.keys(nodeLinksMap).forEach(nodeId => delete nodeLinksMap[nodeId])
     Object.keys(nodeImagesMap).forEach(nodeId => delete nodeImagesMap[nodeId])
-    Object.keys(nodeReviewsMap).forEach(nodeId => delete nodeReviewsMap[nodeId])
     for (const item of items) {
       const nodeId = Number(item.node_id)
       const value = item.meta_value || {}
@@ -1138,8 +1114,6 @@ async function loadNodeMetasFromServer() {
         nodeLinksMap[nodeId] = value
       } else if (item.meta_type === 'image') {
         nodeImagesMap[nodeId] = value
-      } else if (item.meta_type === 'review') {
-        nodeReviewsMap[nodeId] = value
       }
     }
     metaLoaded.value = true
@@ -1164,10 +1138,6 @@ function saveNodeImages() {
   scheduleRemoteSave()
 }
 
-function saveNodeReviews() {
-  scheduleRemoteSave()
-}
-
 function loadNodeTags() {
   // 节点元数据从服务端加载，见 loadNodeMetasFromServer。
 }
@@ -1181,10 +1151,6 @@ function loadNodeLinks() {
 }
 
 function loadNodeImages() {
-  // 节点元数据从服务端加载，见 loadNodeMetasFromServer。
-}
-
-function loadNodeReviews() {
   // 节点元数据从服务端加载，见 loadNodeMetasFromServer。
 }
 
@@ -1292,7 +1258,6 @@ async function createCanvasSnapshot() {
       nodeNotesMap: clonePlainObject(nodeNotesMap),
       nodeLinksMap: clonePlainObject(nodeLinksMap),
       nodeImagesMap: clonePlainObject(nodeImagesMap),
-      nodeReviewsMap: clonePlainObject(nodeReviewsMap),
       collapsedNodeIds: [...collapsedNodeIds.value],
       appearance: clonePlainObject(appearanceForm)
     }
@@ -1303,13 +1268,12 @@ async function createCanvasSnapshot() {
 }
 
 async function restoreCanvasSnapshot(snapshot) {
-  await confirmAction(`确认恢复快照「${snapshot.name}」吗？当前页面标签、备注、链接、图片、评审和外观会被覆盖。`, '恢复脑图快照')
+  await confirmAction(`确认恢复快照「${snapshot.name}」吗？当前页面标签、备注、链接、图片和外观会被覆盖。`, '恢复脑图快照')
   const data = snapshot.data_json || snapshot.data || {}
   restoreTagsMap(data.nodeTagsMap || {})
   restorePersistedMap(nodeNotesMap, data.nodeNotesMap || {})
   restorePersistedMap(nodeLinksMap, data.nodeLinksMap || {})
   restorePersistedMap(nodeImagesMap, data.nodeImagesMap || {})
-  restorePersistedMap(nodeReviewsMap, data.nodeReviewsMap || {})
   collapsedNodeIds.value = Array.isArray(data.collapsedNodeIds) ? data.collapsedNodeIds : []
   Object.assign(appearanceForm, data.appearance || {})
   handleSaveCanvas()
@@ -1334,22 +1298,10 @@ function restorePersistedMap(targetMap, sourceMap) {
   })
 }
 
-function applyAppearanceTheme() {
-  const theme = appearanceThemes.find(item => item.name === appearanceForm.theme)
-  if (!theme) {
-    return
-  }
-  appearanceForm.rootColor = theme.rootColor
-  appearanceForm.nodeBorderColor = theme.nodeBorderColor
-  appearanceForm.connectorColor = theme.connectorColor
-  saveAppearanceSettings()
-}
-
 function loadAppearanceSettings() {
   try {
     const savedSettings = JSON.parse(window.localStorage.getItem(appearanceStorageKey) || '{}')
     Object.assign(appearanceForm, {
-      theme: savedSettings.theme || appearanceForm.theme,
       rootColor: savedSettings.rootColor || appearanceForm.rootColor,
       nodeBorderColor: savedSettings.nodeBorderColor || appearanceForm.nodeBorderColor,
       connectorColor: savedSettings.connectorColor || appearanceForm.connectorColor,
@@ -1440,7 +1392,6 @@ function nodeHasTag(nodeId, tagText) {
 
 function resetAppearanceSettings(showMessage = true) {
   Object.assign(appearanceForm, {
-    theme: 'blue',
     rootColor: '#6ea4c8',
     nodeBorderColor: '#8db7d6',
     connectorColor: '#7faed0',
@@ -1611,119 +1562,6 @@ function clearNodeImage() {
   saveNodeImages()
   showSuccess('图片已删除')
   imageDialogVisible.value = false
-}
-
-function openReviewDialog(node) {
-  if (!node) {
-    showWarning('请先选择一个节点')
-    return
-  }
-  selectedNode.value = node
-  selectedNodeIds.value = [node.node_id]
-  reviewEditingNode.value = node
-  reviewDraft.value = nodeReviewsMap[node.node_id]?.text || ''
-  reviewDialogVisible.value = true
-}
-
-function saveNodeReview() {
-  if (!reviewEditingNode.value) {
-    return
-  }
-  const reviewText = reviewDraft.value.trim()
-  if (!reviewText) {
-    showWarning('请填写评审意见')
-    return
-  }
-  nodeReviewsMap[reviewEditingNode.value.node_id] = {
-    text: reviewText,
-    reviewer_id: getCurrentUserId(),
-    updated_at: new Date().toLocaleString()
-  }
-  saveNodeReviews()
-  showSuccess('评审意见已保存')
-  reviewDialogVisible.value = false
-}
-
-function clearNodeReview() {
-  if (!reviewEditingNode.value) {
-    return
-  }
-  delete nodeReviewsMap[reviewEditingNode.value.node_id]
-  reviewDraft.value = ''
-  saveNodeReviews()
-  showSuccess('评审意见已删除')
-  reviewDialogVisible.value = false
-}
-
-function openAutomationDialog(node) {
-  if (!node) {
-    showWarning('请先选择一个用例节点')
-    return
-  }
-  automationNode.value = node
-  automationTemplate.value = 'pytest'
-  refreshAutomationScript()
-  automationDialogVisible.value = true
-}
-
-function refreshAutomationScript() {
-  if (!automationNode.value) {
-    automationScript.value = ''
-    return
-  }
-  if (automationTemplate.value === 'selenium') {
-    automationScript.value = buildSeleniumScript(automationNode.value)
-    return
-  }
-  if (automationTemplate.value === 'manual') {
-    automationScript.value = buildManualExecutionTemplate(automationNode.value)
-    return
-  }
-  automationScript.value = buildPytestScript(automationNode.value)
-}
-
-async function copyAutomationScript() {
-  if (!automationScript.value.trim()) {
-    showWarning('暂无可复制的脚本内容')
-    return
-  }
-  await navigator.clipboard.writeText(automationScript.value)
-  showSuccess('自动化脚本草稿已复制')
-}
-
-function buildPytestScript(node) {
-  const testName = toPythonTestName(node.title)
-  return `import pytest\n\n\ndef test_${testName}():\n    \"\"\"${escapeTripleQuotes(node.title)}\"\"\"\n    # 前置条件\n${formatPythonComments(node.precondition || '补充测试前置条件')}\n\n    # 测试步骤\n${formatPythonComments(node.test_steps || '补充测试步骤')}\n\n    actual_result = \"TODO: 执行被测功能后填写实际结果\"\n    expected_result = ${JSON.stringify(node.expected_result || '补充预期结果')}\n\n    assert expected_result in actual_result\n`
-}
-
-function buildSeleniumScript(node) {
-  const testName = toPythonTestName(node.title)
-  return `from selenium import webdriver\nfrom selenium.webdriver.common.by import By\n\n\ndef test_${testName}_ui():\n    driver = webdriver.Chrome()\n    try:\n        driver.get(\"http://localhost:5173\")\n\n        # 前置条件\n${formatPythonComments(node.precondition || '补充浏览器登录、环境准备等前置条件', 8)}\n\n        # 测试步骤\n${formatPythonComments(node.test_steps || '补充页面点击、输入、断言步骤', 8)}\n\n        expected_result = ${JSON.stringify(node.expected_result || '补充预期结果')}\n        assert expected_result\n    finally:\n        driver.quit()\n`
-}
-
-function buildManualExecutionTemplate(node) {
-  return `用例名称：${node.title}\n优先级：${node.priority || 'P1'}\n\n【前置条件】\n${node.precondition || '待补充'}\n\n【执行步骤】\n${node.test_steps || '待补充'}\n\n【预期结果】\n${node.expected_result || '待补充'}\n\n【执行记录】\n实际结果：\n缺陷描述：\n执行人：\n执行时间：\n`
-}
-
-function toPythonTestName(title) {
-  return String(title || 'case')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9一-龥]+/gi, '_')
-    .replace(/^_+|_+$/g, '') || 'case'
-}
-
-function formatPythonComments(text, indent = 4) {
-  const prefix = `${' '.repeat(indent)}# `
-  return String(text || '')
-    .split(/\r?\n/)
-    .filter(line => line.trim())
-    .map(line => `${prefix}${line.trim()}`)
-    .join('\n') || `${prefix}待补充`
-}
-
-function escapeTripleQuotes(text) {
-  return String(text || '').replace(/\"\"\"/g, '\\\"\\\"\\\"')
 }
 
 function openSearchDialog() {
@@ -2074,11 +1912,10 @@ function handleSaveCanvas() {
   saveNodeNotes()
   saveNodeLinks()
   saveNodeImages()
-  saveNodeReviews()
   saveCollapsedNodes()
   saveAppearanceSettings()
   flushRemoteSave()
-  showSuccess('当前脑图标签、备注、链接、图片、评审、折叠状态和外观已保存')
+  showSuccess('当前脑图标签、备注、链接、图片、折叠状态和外观已保存')
 }
 
 function zoomIn() {
@@ -2123,12 +1960,10 @@ function handleKeydown(event) {
     noteDialogVisible.value = false
     linkDialogVisible.value = false
     imageDialogVisible.value = false
-    reviewDialogVisible.value = false
-    automationDialogVisible.value = false
     editingNodeId.value = null
     return
   }
-  if (shortcutDialogVisible.value || snapshotDialogVisible.value || nodeDialogVisible.value || noteDialogVisible.value || linkDialogVisible.value || imageDialogVisible.value || reviewDialogVisible.value || automationDialogVisible.value || versionDrawerVisible.value || searchDialogVisible.value) {
+  if (shortcutDialogVisible.value || snapshotDialogVisible.value || nodeDialogVisible.value || noteDialogVisible.value || linkDialogVisible.value || imageDialogVisible.value || versionDrawerVisible.value || searchDialogVisible.value) {
     return
   }
 
@@ -2454,6 +2289,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleKeydown)
+  stopMiniMapPan()
   if (remoteSaveTimer) {
     window.clearTimeout(remoteSaveTimer)
     flushRemoteSave()
@@ -2540,10 +2376,6 @@ onBeforeUnmount(() => {
 
 .toolbar-block:last-child {
   border-right: 0;
-}
-
-.style-toolbar-grid {
-  align-items: stretch;
 }
 
 .style-block {
@@ -2768,39 +2600,38 @@ onBeforeUnmount(() => {
   width: 38px;
   height: 22px;
   border: 2px solid #ef4444;
+  cursor: move;
   transition: 0.18s ease;
 }
 
 .quick-node-menu {
   position: fixed;
   width: 300px;
-  height: 340px;
+  height: 400px;
   z-index: 3000;
   pointer-events: none;
 }
 
-.quick-ring {
+.quick-ring-track {
   position: absolute;
-  left: 66px;
-  top: 30px;
-  width: 168px;
-  height: 168px;
-  border: 30px solid rgba(71, 85, 105, 0.34);
-  border-radius: 50%;
-  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.16);
+  left: 0;
+  top: 0;
+  width: 300px;
+  height: 400px;
   pointer-events: none;
+  filter: drop-shadow(0 8px 20px rgba(15, 23, 42, 0.08));
 }
 
 .quick-button {
   position: absolute;
-  width: 68px;
-  height: 68px;
+  width: 58px;
+  height: 58px;
   margin-left: 0 !important;
   padding: 0 !important;
   border: 0;
   color: #111827;
   background: rgba(255, 255, 255, 0.98);
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.16);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.16);
   pointer-events: auto;
 }
 
@@ -2808,11 +2639,12 @@ onBeforeUnmount(() => {
   color: #fff;
   background: #f05b67;
   transform: translateY(-2px);
-  box-shadow: 0 16px 34px rgba(240, 91, 103, 0.28);
+  box-shadow: 0 14px 30px rgba(240, 91, 103, 0.28);
 }
 
 .quick-button.primary:hover {
   color: #fff;
+  /* 保留原有编辑按钮悬停逻辑（与改前一致）：背景切为主色纯色、不抬起、阴影加深 */
   background: #f05b67;
   transform: none;
   box-shadow: 0 16px 36px rgba(240, 91, 103, 0.32);
@@ -2830,33 +2662,35 @@ onBeforeUnmount(() => {
 .quick-text {
   display: block;
   color: inherit;
-  font-size: 17px;
+  font-size: 15px;
   font-weight: 800;
 }
 
+/* 环心：主操作「编辑」（红色，保留在圆环中央） */
 .quick-button.primary {
-  left: 114px;
-  top: 80px;
-  width: 72px;
-  height: 72px;
+  left: 117px;
+  top: 162px;
+  width: 66px;
+  height: 66px;
   color: #fff;
-  background: #f05b67;
-  box-shadow: 0 16px 36px rgba(240, 91, 103, 0.32);
+  background: radial-gradient(circle at 35% 30%, #f87171, #f05b67);
+  box-shadow: 0 14px 32px rgba(240, 91, 103, 0.45), 0 4px 12px rgba(15, 23, 42, 0.2);
 }
 
-.quick-button:nth-child(3) { left: 218px; top: 82px; }
-.quick-button:nth-child(4) { left: 190px; top: 164px; }
-.quick-button:nth-child(5) { left: 42px; top: 164px; }
-.quick-button:nth-child(6) { left: 14px; top: 82px; }
-.quick-button:nth-child(7) { left: 116px; top: 0; }
-.quick-button:nth-child(8) { left: 116px; top: 188px; }
+/* 环上 60° 等角均匀分布：环心 (150,195) 半径 105，从正上顺时针 */
+.quick-button:nth-child(8) { left: 121px; top: 61px; }   /* 上级 0° */
+.quick-button:nth-child(3) { left: 212px; top: 114px; }  /* 前移 60° */
+.quick-button:nth-child(4) { left: 212px; top: 219px; }  /* 下级 120° */
+.quick-button:nth-child(5) { left: 121px; top: 271px; }  /* 删除 180° */
+.quick-button:nth-child(6) { left: 30px; top: 219px; }   /* 同级 240° */
+.quick-button:nth-child(7) { left: 30px; top: 114px; }   /* 后移 300° */
 
 .quick-extra-actions {
   position: absolute;
-  left: 6px;
-  top: 274px;
+  left: 4px;
+  top: 356px;
   display: flex;
-  gap: 14px;
+  gap: 10px;
   pointer-events: auto;
 }
 
@@ -2895,7 +2729,6 @@ onBeforeUnmount(() => {
 
 .note-dialog-body,
 .meta-dialog-body,
-.automation-dialog-body,
 .case-review-body {
   display: flex;
   flex-direction: column;
@@ -2948,19 +2781,6 @@ onBeforeUnmount(() => {
 .review-conclusion {
   font-weight: 700;
   color: #166534 !important;
-}
-
-.automation-tools {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.automation-dialog-body :deep(.el-textarea__inner) {
-  font-family: Consolas, 'Courier New', monospace;
-  font-size: 13px;
-  line-height: 1.55;
 }
 
 .note-node-title {
