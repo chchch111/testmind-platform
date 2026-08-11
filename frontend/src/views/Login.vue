@@ -15,6 +15,12 @@
       </el-form>
 
       <el-button class="login-button" type="primary" size="large" :loading="loggingIn" @click="handleLogin">登录系统</el-button>
+
+      <div class="login-tip">
+        <div class="tip-title">管理员账号</div>
+        <div class="tip-line"><span>用户名</span><code>admin</code></div>
+        <div class="tip-line"><span>密码</span><code>admin123456</code></div>
+      </div>
     </div>
   </div>
 </template>
@@ -91,5 +97,38 @@ async function handleLogin() {
 
 .login-button {
   width: 100%;
+}
+
+.login-tip {
+  margin-top: 20px;
+  padding: 14px 16px;
+  border: 1px dashed #93c5fd;
+  border-radius: 10px;
+  background: #eff6ff;
+}
+
+.tip-title {
+  margin-bottom: 8px;
+  color: #1d4ed8;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.tip-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 6px;
+  color: #475569;
+  font-size: 13px;
+}
+
+.tip-line code {
+  padding: 2px 10px;
+  color: #1d4ed8;
+  background: #dbeafe;
+  border-radius: 5px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
 }
 </style>
