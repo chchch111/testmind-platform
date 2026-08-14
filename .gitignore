@@ -14,6 +14,7 @@ storage/exports/*
 storage/models/*
 storage/browser-profile*/
 storage/screenshots/
+storage/logs/
 !storage/faiss/.gitkeep
 !storage/uploads/.gitkeep
 !storage/exports/.gitkeep

@@ -122,7 +122,18 @@
         <el-button size="small" :disabled="!selectedNodeHasChildren" @click="toggleSelectedNodeCollapse">展开/收起</el-button>
         <el-button size="small" @click="expandAllNodes">展开全部</el-button>
         <el-button size="small" @click="collapseAllNodes">收起全部</el-button>
-        <span class="mind-tip">Alt + 鼠标拖动画布移动视野，Ctrl + 滚轮仅在脑图区域缩放</span>
+        <span class="mind-tip shortcut-entry" title="点击查看全部快捷键" @click="shortcutDialogVisible = true">
+          <kbd>Alt</kbd><span class="tip-plus">+</span><kbd>左键拖动</kbd>移动视野
+          <span class="tip-sep">·</span>
+          <kbd>Enter</kbd>兄弟
+          <span class="tip-sep">·</span>
+          <kbd>Tab</kbd>子级
+          <span class="tip-sep">·</span>
+          <kbd>Ctrl</kbd><span class="tip-plus">+</span><kbd>Z</kbd>撤销
+          <span class="tip-sep">·</span>
+          <kbd>Ctrl</kbd><span class="tip-plus">+</span><kbd>滚轮</kbd>缩放
+          <span class="tip-more">点击查看全部 »</span>
+        </span>
       </div>
 
       <MindMapCanvas
@@ -593,8 +604,7 @@ const shortcutGroups = [
   {
     title: '视野控制',
     items: [
-      { keys: ['Alt', '拖动'], label: '拖动视野' },
-      { keys: ['Alt', '右键拖动'], label: '拖动视野' },
+      { keys: ['Alt', '左键拖动'], label: '拖动视野' },
       { keys: ['滚轮'], label: '移动视野' },
       { keys: ['触摸板'], label: '移动视野' },
       { keys: ['双击空白处'], label: '居中根节点' },
@@ -2488,6 +2498,61 @@ onBeforeUnmount(() => {
 .mind-tip {
   color: #64748b;
   font-size: 13px;
+}
+
+/* 常驻快捷键提示条：显示常用快捷键，点击打开完整面板 */
+.shortcut-entry {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 12px;
+  color: #475569;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: 0.15s ease;
+  white-space: nowrap;
+}
+
+.shortcut-entry:hover {
+  color: #1d4ed8;
+  background: #eff6ff;
+  border-color: #93c5fd;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.12);
+}
+
+.shortcut-entry kbd {
+  display: inline-flex;
+  align-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  color: #334155;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.tip-plus,
+.tip-sep {
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.tip-sep {
+  margin: 0 3px;
+}
+
+.tip-more {
+  margin-left: 4px;
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .viewer-badge {

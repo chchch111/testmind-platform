@@ -204,7 +204,7 @@ function emitNodeDragEnd() {
   emit('node-drag-end')
 }
 
-function centerRootNode() {
+function centerMindMapView() {
   if (!scrollRef.value) {
     return
   }
@@ -213,8 +213,32 @@ function centerRootNode() {
     emitViewportChange()
     return
   }
-  scrollRef.value.scrollLeft = rootNode.offsetLeft - scrollRef.value.clientWidth / 2 + rootNode.offsetWidth / 2
-  scrollRef.value.scrollTop = rootNode.offsetTop - scrollRef.value.clientHeight / 2 + rootNode.offsetHeight / 2
+
+  const nodes = Array.from(scrollRef.value.querySelectorAll('.mind-node[data-node-id]'))
+  if (nodes.length) {
+    const scrollRect = scrollRef.value.getBoundingClientRect()
+    const bounds = nodes.reduce(
+      (result, element) => {
+        const rect = element.getBoundingClientRect()
+        const left = rect.left - scrollRect.left + scrollRef.value.scrollLeft
+        const right = left + rect.width
+        const top = rect.top - scrollRect.top + scrollRef.value.scrollTop
+        const bottom = top + rect.height
+        return {
+          minX: Math.min(result.minX, left),
+          maxX: Math.max(result.maxX, right),
+          minY: Math.min(result.minY, top),
+          maxY: Math.max(result.maxY, bottom)
+        }
+      },
+      { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity }
+    )
+    scrollRef.value.scrollLeft = bounds.minX + (bounds.maxX - bounds.minX) / 2 - scrollRef.value.clientWidth / 2
+    scrollRef.value.scrollTop = bounds.minY + (bounds.maxY - bounds.minY) / 2 - scrollRef.value.clientHeight / 2
+  } else {
+    scrollRef.value.scrollLeft = rootNode.offsetLeft - scrollRef.value.clientWidth / 2 + rootNode.offsetWidth / 2
+    scrollRef.value.scrollTop = rootNode.offsetTop - scrollRef.value.clientHeight / 2 + rootNode.offsetHeight / 2
+  }
   emitViewportChange()
 }
 
@@ -253,7 +277,7 @@ function emitViewportChange() {
 
 async function centerRootNodeAfterRender() {
   await nextTick()
-  window.requestAnimationFrame(centerRootNode)
+  window.requestAnimationFrame(centerMindMapView)
 }
 
 function handleWheel(event) {
@@ -272,7 +296,8 @@ function handleMouseDown(event) {
   if (!scrollRef.value || event.target.closest('.mind-node, input, button, .el-button')) {
     return
   }
-  if (event.altKey && event.button <= 2) {
+  // 仅 Alt + 左键拖动画布移动视野；右键已保留给其他用途，不参与画布拖动。
+  if (event.altKey && event.button === 0) {
     event.preventDefault()
     dragging.value = true
     dragState.startX = event.clientX
@@ -363,11 +388,17 @@ function resetView() {
   centerRootNodeAfterRender()
 }
 
+let didInitialCenter = false
+
 watch(
   () => props.treeData,
   value => {
     if (value && value.length) {
-      centerRootNodeAfterRender()
+      // 仅在首次加载时把视野居中到根节点，后续结构变化保持用户当前视野，避免"编辑后视野跳回根节点"。
+      if (!didInitialCenter) {
+        didInitialCenter = true
+        centerRootNodeAfterRender()
+      }
     }
   },
   { immediate: true }
