@@ -183,6 +183,7 @@ def add_manual_source(db: Session, knowledge_base_id: int, data: ManualSourceCre
         created_by=data.created_by,
     )
     db.add(source)
+    mark_index_stale(db, knowledge_base_id)
     db.commit()
     db.refresh(source)
     return source
@@ -208,6 +209,7 @@ def delete_knowledge_source(db: Session, source_id: int, operator_id: int) -> di
         raise HTTPException(status_code=404, detail="知识来源不存在")
     source.is_deleted = 1
     source.status = "disabled"
+    mark_index_stale(db, source.knowledge_base_id)
     db.commit()
     return {"message": "知识来源已删除", "source_id": source_id}
 
@@ -255,6 +257,7 @@ def upload_knowledge_source_file(db: Session, knowledge_base_id: int, file: Uplo
         created_by=created_by,
     )
     db.add(source)
+    mark_index_stale(db, knowledge_base_id)
     db.commit()
     db.refresh(source)
     return source
@@ -302,6 +305,7 @@ def import_case_set_as_source(db: Session, knowledge_base_id: int, case_set_id: 
         created_by=created_by,
     )
     db.add(source)
+    mark_index_stale(db, knowledge_base_id)
     db.commit()
     db.refresh(source)
     return source
@@ -639,6 +643,23 @@ def clear_faiss_cache(faiss_index_id: int | None = None) -> None:
         _faiss_resource_cache.clear()
         return
     _faiss_resource_cache.pop(faiss_index_id, None)
+
+
+def mark_index_stale(db: Session, knowledge_base_id: int) -> None:
+    """知识来源变更后标记现有索引过期，提醒用户重新构建。"""
+    faiss_indexes = list(
+        db.scalars(
+            select(FaissIndex).where(
+                FaissIndex.knowledge_base_id == knowledge_base_id,
+                FaissIndex.status == "active",
+            )
+        ).all()
+    )
+    for faiss_index in faiss_indexes:
+        faiss_index.status = "stale"
+        clear_faiss_cache(faiss_index.faiss_index_id)
+    if faiss_indexes:
+        db.flush()
 
 
 def get_or_create_faiss_index(db: Session, knowledge_base: KnowledgeBase) -> FaissIndex:

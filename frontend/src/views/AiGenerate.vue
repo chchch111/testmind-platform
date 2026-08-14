@@ -42,7 +42,7 @@
                 </el-tag>
               </div>
               <div v-if="selectedKnowledgeBase.index_status !== 'active'" class="kb-warn">
-                该知识库尚未构建索引，生成时可能检索不到上下文，请先到知识库管理页构建。
+                {{ indexStatusHint(selectedKnowledgeBase.index_status) }}
               </div>
             </div>
 
@@ -74,6 +74,9 @@
           <el-button class="generate-button" type="primary" size="large" :loading="generating" @click="handleGenerate">
             {{ generating ? '正在生成...' : '开始AI生成' }}
           </el-button>
+          <el-button class="presearch-button" size="large" :loading="preSearching" @click="handlePreSearch">
+            预检索知识片段
+          </el-button>
         </div>
       </el-col>
 
@@ -94,6 +97,39 @@
             <span class="status-dot" />
             <span class="status-text">{{ statusBarText }}</span>
             <span v-if="generating" class="status-detail">{{ currentStageText }}</span>
+          </div>
+          <el-progress
+            v-if="generating"
+            class="generate-progress"
+            :percentage="generateProgress"
+            :stroke-width="12"
+            :color="generateProgressColor"
+            text-inside
+          />
+          <div v-if="generating && generateStageDetail" class="generate-stage-detail">
+            {{ generateStageDetail }}
+          </div>
+
+          <div v-if="preSearchResult.length" class="retrieval-panel">
+            <div class="retrieval-head">
+              <div>
+                <h3>预检索知识片段</h3>
+                <p class="section-desc">已命中 {{ preSearchResult.length }} 条，勾选后生成会只使用这些片段。</p>
+              </div>
+              <div class="retrieval-actions">
+                <el-button size="small" @click="selectAllChunks">全选</el-button>
+                <el-button size="small" @click="selectedChunkIds = []">清空</el-button>
+              </div>
+            </div>
+            <el-checkbox-group v-model="selectedChunkIds" class="chunk-check-list">
+              <div v-for="(item, index) in preSearchResult" :key="item.chunk_id" class="chunk-check-card">
+                <el-checkbox :label="item.chunk_id">
+                  <span class="chunk-check-title">#{{ index + 1 }} {{ item.source_name || `来源#${item.source_id}` }}</span>
+                  <span class="chunk-score">相似度 {{ formatScore(item.score) }}</span>
+                </el-checkbox>
+                <div class="chunk-preview-text">{{ item.chunk_text }}</div>
+              </div>
+            </el-checkbox-group>
           </div>
 
           <AiResultPreview :result="result" />
@@ -179,11 +215,11 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import AiResultPreview from '../components/AiResultPreview.vue'
-import { generateCaseSet, listGenerationRecords } from '../api/ai'
-import { listKnowledgeBases } from '../api/rag'
+import { getGenerateProgress, listGenerationRecords, startGenerateCaseSet } from '../api/ai'
+import { listKnowledgeBases, searchKnowledgeBase } from '../api/rag'
 import { INDEX_STATUS_TEXT } from '../utils/constants'
 import { formatDateTime } from '../utils/format'
 import { showSuccess, showWarning } from '../utils/message'
@@ -194,11 +230,17 @@ const knowledgeBases = ref([])
 const records = ref([])
 const result = ref(null)
 const generating = ref(false)
+const preSearching = ref(false)
 const recordLoading = ref(false)
 const recordDetailVisible = ref(false)
 const activeRecord = ref(null)
 const currentStageText = ref('等待输入需求并开始生成')
-let stageTimer = null
+const generateStageDetail = ref('')
+const generateProgress = ref(0)
+const preSearchResult = ref([])
+const selectedChunkIds = ref([])
+let generatePollTimer = null
+let generatePollCancelled = false
 
 const form = reactive({
   knowledge_base_id: null,
@@ -220,10 +262,25 @@ const statusBarText = computed(() => {
   }
   return '等待开始生成'
 })
+const generateProgressColor = computed(() => {
+  if (generateProgress.value >= 90) return '#16a34a'
+  if (generateProgress.value >= 58) return '#f59e0b'
+  return '#2563eb'
+})
 
 function indexStatusTagType(status) {
-  const map = { none: 'info', rebuilding: 'warning', active: 'success', deleted: 'danger' }
+  const map = { none: 'info', rebuilding: 'warning', stale: 'warning', active: 'success', deleted: 'danger' }
   return map[status] || 'info'
+}
+
+function indexStatusHint(status) {
+  if (status === 'stale') {
+    return '该知识库的知识来源已变更，当前索引已过期，请先到知识库管理页重新构建索引。'
+  }
+  if (status === 'rebuilding') {
+    return '该知识库正在构建索引，请等待构建完成后再生成。'
+  }
+  return '该知识库尚未构建可用索引，请先到知识库管理页构建。'
 }
 
 async function loadInitialData() {
@@ -255,47 +312,104 @@ async function handleGenerate() {
     showWarning('请输入测试需求')
     return
   }
+  if (preSearchResult.value.length && !selectedChunkIds.value.length) {
+    showWarning('请至少选择一个预检索知识片段，或刷新页面后直接生成')
+    return
+  }
 
   generating.value = true
   result.value = null
-  startStageProgress()
+  generateProgress.value = 0
+  currentStageText.value = '任务启动中...'
+  generateStageDetail.value = ''
+  generatePollCancelled = false
   try {
-    const data = await generateCaseSet({
+    const task = await startGenerateCaseSet({
       knowledge_base_id: form.knowledge_base_id,
       requirement_text: form.requirement_text,
       top_k: form.top_k,
+      selected_chunk_ids: selectedChunkIds.value.length ? selectedChunkIds.value : null,
       created_by: getCurrentUserId(),
       save_to_case_set: form.save_to_case_set
     })
-    result.value = data
-    currentStageText.value = '生成完成，结果已返回前端'
-    showSuccess(data.case_set_id ? `AI生成成功，已保存为草稿用例集 #${data.case_set_id}，可在用例集管理中审阅并发布` : 'AI生成成功，结果已返回预览')
-    await loadRecords()
+    await pollGenerateProgress(task.task_id)
   } finally {
-    stopStageProgress()
+    stopGeneratePolling()
     generating.value = false
   }
 }
 
-function startStageProgress() {
-  // 说明：后端当前是单次同步请求，无法返回真实阶段进度。
-  // 这里仅展示处理中的状态文案，完成后回到完成态。
-  const texts = [
-    '正在调用后端生成服务（RAG检索 → AI生成 → 结果入库）...',
-    '后端处理中，请耐心等待...'
-  ]
-  currentStageText.value = texts[0]
-  let index = 0
-  stageTimer = window.setInterval(() => {
-    index = Math.min(index + 1, texts.length - 1)
-    currentStageText.value = texts[index]
-  }, 3000)
+async function pollGenerateProgress(taskId) {
+  while (!generatePollCancelled) {
+    try {
+      const state = await getGenerateProgress(taskId)
+      generateProgress.value = state.progress || 0
+      currentStageText.value = state.stage || ''
+      generateStageDetail.value = state.detail || ''
+      if (state.status === 'success') {
+        result.value = state.result
+        currentStageText.value = '生成完成，结果已返回前端'
+        showSuccess(state.result?.case_set_id ? `AI生成成功，已保存为草稿用例集 #${state.result.case_set_id}，可在用例集管理中审阅并发布` : 'AI生成成功，结果已返回预览')
+        await loadRecords()
+        return
+      }
+      if (state.status === 'error') {
+        showWarning(state.detail || 'AI生成失败')
+        return
+      }
+      await waitForNextGeneratePoll(800)
+    } catch {
+      await waitForNextGeneratePoll(1200)
+    }
+  }
 }
 
-function stopStageProgress() {
-  if (stageTimer) {
-    window.clearInterval(stageTimer)
-    stageTimer = null
+function waitForNextGeneratePoll(ms) {
+  return new Promise(resolve => {
+    generatePollTimer = window.setTimeout(() => {
+      generatePollTimer = null
+      resolve()
+    }, ms)
+  })
+}
+
+async function handlePreSearch() {
+  if (!form.knowledge_base_id) {
+    showWarning('请先选择知识库')
+    return
+  }
+  if (!form.requirement_text.trim()) {
+    showWarning('请输入测试需求')
+    return
+  }
+  preSearching.value = true
+  try {
+    const data = await searchKnowledgeBase(form.knowledge_base_id, {
+      query_text: form.requirement_text,
+      top_k: form.top_k
+    })
+    preSearchResult.value = data.items || []
+    selectedChunkIds.value = preSearchResult.value.map(item => item.chunk_id)
+    showSuccess(`预检索完成，命中 ${preSearchResult.value.length} 条知识片段`)
+  } finally {
+    preSearching.value = false
+  }
+}
+
+function selectAllChunks() {
+  selectedChunkIds.value = preSearchResult.value.map(item => item.chunk_id)
+}
+
+function clearPreSearch() {
+  preSearchResult.value = []
+  selectedChunkIds.value = []
+}
+
+function stopGeneratePolling() {
+  generatePollCancelled = true
+  if (generatePollTimer) {
+    window.clearTimeout(generatePollTimer)
+    generatePollTimer = null
   }
 }
 
@@ -326,6 +440,10 @@ function formatRecordJson(value) {
   return JSON.stringify(value, null, 2)
 }
 
+function formatScore(value) {
+  return Number(value || 0).toFixed(4)
+}
+
 function previewRecord(row) {
   result.value = {
     generation_id: row.generation_id,
@@ -339,7 +457,12 @@ function previewRecord(row) {
 }
 
 onMounted(loadInitialData)
-onBeforeUnmount(stopStageProgress)
+onBeforeUnmount(stopGeneratePolling)
+
+watch(
+  () => [form.knowledge_base_id, form.requirement_text, form.top_k],
+  clearPreSearch
+)
 </script>
 
 <style scoped>
@@ -448,6 +571,11 @@ onBeforeUnmount(stopStageProgress)
   margin-top: 18px;
 }
 
+.presearch-button {
+  width: 100%;
+  margin-top: 10px;
+}
+
 .status-bar {
   display: flex;
   align-items: center;
@@ -483,6 +611,100 @@ onBeforeUnmount(stopStageProgress)
 .status-detail {
   color: #64748b;
   font-size: 13px;
+}
+
+.generate-progress {
+  margin: -4px 0 12px;
+}
+
+.generate-stage-detail {
+  margin: -4px 0 16px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.retrieval-panel {
+  margin-bottom: 16px;
+  padding: 14px;
+  border: 1px solid #dbeafe;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.retrieval-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.retrieval-head h3 {
+  margin: 0 0 6px;
+  font-size: 16px;
+}
+
+.retrieval-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.chunk-check-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 300px;
+  overflow: auto;
+}
+
+.chunk-check-card {
+  padding: 10px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.chunk-check-card :deep(.el-checkbox) {
+  width: 100%;
+  height: auto;
+  align-items: flex-start;
+  white-space: normal;
+}
+
+.chunk-check-card :deep(.el-checkbox__label) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+}
+
+.chunk-check-title {
+  min-width: 0;
+  color: #334155;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chunk-score {
+  flex-shrink: 0;
+  color: #2563eb;
+  font-size: 12px;
+}
+
+.chunk-preview-text {
+  margin-top: 6px;
+  padding-left: 24px;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.7;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: pre-wrap;
 }
 
 @keyframes status-pulse {

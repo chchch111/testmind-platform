@@ -5,20 +5,20 @@
 """
 import pytest
 
-from app.services.ai_service import build_user_prompt, parse_generated_json
+from app.services.ai_service import MAX_GENERATED_NODE_COUNT, build_user_prompt, parse_generated_json
 from app.services.task_service import VALID_EXECUTION_STATUS
 from app.services.xmind_service import build_tagged_title, safe_xmind_error_message
 
 
 class TestParseGeneratedJson:
     def test_plain_json(self):
-        text = '{"case_set_name": "夜视测试", "nodes": []}'
+        text = '{"case_set_name": "夜视测试", "nodes": [{"title": "红外灯测试"}]}'
         result = parse_generated_json(text)
         assert result["case_set_name"] == "夜视测试"
-        assert result["nodes"] == []
+        assert result["nodes"][0]["title"] == "红外灯测试"
 
     def test_json_with_markdown_fence(self):
-        text = '```json\n{"case_set_name": "a", "nodes": []}\n```'
+        text = '```json\n{"case_set_name": "a", "nodes": [{"title": "x"}]}\n```'
         result = parse_generated_json(text)
         assert result["case_set_name"] == "a"
 
@@ -35,9 +35,39 @@ class TestParseGeneratedJson:
         with pytest.raises(ValueError):
             parse_generated_json('{"case_set_name": "a", "nodes": "x"}')
 
+    def test_empty_nodes_rejected(self):
+        with pytest.raises(ValueError):
+            parse_generated_json('{"case_set_name": "a", "nodes": []}')
+
     def test_not_json_at_all(self):
         with pytest.raises(ValueError):
             parse_generated_json("这不是JSON")
+
+    def test_normalizes_invalid_priority_and_missing_case_fields(self):
+        text = """
+        {
+          "case_set_name": "质量校验",
+          "nodes": [
+            {"title": "空字段用例", "node_type": "case", "priority": "P9", "children": []}
+          ]
+        }
+        """
+        result = parse_generated_json(text)
+        node = result["nodes"][0]
+        assert node["priority"] == "P1"
+        assert node["test_steps"] == "待人工补充测试步骤"
+        assert node["expected_result"] == "待人工补充预期结果"
+        assert result["quality_warnings"]
+
+    def test_rejects_too_deep_tree(self):
+        text = '{"case_set_name":"a","nodes":[{"title":"1","children":[{"title":"2","children":[{"title":"3","children":[{"title":"4","children":[{"title":"5","children":[{"title":"6","children":[{"title":"7"}]}]}]}]}]}]}]}'
+        with pytest.raises(ValueError, match="层级过深"):
+            parse_generated_json(text)
+
+    def test_rejects_too_many_nodes(self):
+        nodes = ",".join('{"title":"n%s"}' % index for index in range(MAX_GENERATED_NODE_COUNT + 1))
+        with pytest.raises(ValueError, match="节点过多"):
+            parse_generated_json(f'{{"case_set_name":"a","nodes":[{nodes}]}}')
 
 
 class TestBuildTaggedTitle:

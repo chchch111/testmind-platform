@@ -695,7 +695,7 @@ function scoreColor(score) {
 }
 
 function indexStatusTagType(status) {
-  const map = { none: 'info', rebuilding: 'warning', active: 'success', deleted: 'danger' }
+  const map = { none: 'info', rebuilding: 'warning', stale: 'warning', active: 'success', deleted: 'danger' }
   return map[status] || 'info'
 }
 

@@ -1,17 +1,20 @@
 import json
 import re
 import socket
+import threading
 import urllib.error
 import urllib.request
+import uuid
 
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.db.database import SessionLocal
 from app.models.ai import AiGenerationRecord, RagRetrievalRecord
 from app.models.case import TestCaseNode, TestCaseSet
-from app.models.knowledge import FaissIndex
+from app.models.knowledge import FaissIndex, KnowledgeChunk, KnowledgeSource
 from app.schemas.ai import AiGenerateRequest
 from app.schemas.rag import RagSearchRequest
 from app.services.case_service import create_node_version, ensure_user_exists
@@ -19,6 +22,11 @@ from app.services.rag_service import search_knowledge_base
 
 
 PROMPT_TEMPLATE_VERSION = "v1"
+MAX_GENERATED_NODE_COUNT = 120
+MAX_GENERATED_TREE_DEPTH = 6
+VALID_NODE_TYPES = {"folder", "case"}
+VALID_PRIORITIES = {"P0", "P1", "P2", "P3"}
+_generation_tasks: dict[str, dict] = {}
 
 
 SYSTEM_PROMPT = """
@@ -36,18 +44,21 @@ SYSTEM_PROMPT = """
 """.strip()
 
 
-def generate_test_cases(db: Session, data: AiGenerateRequest) -> dict:
+def generate_test_cases(db: Session, data: AiGenerateRequest, progress_callback=None) -> dict:
     ensure_user_exists(db, data.created_by)
 
-    search_result = search_knowledge_base(
-        db,
-        data.knowledge_base_id,
-        RagSearchRequest(query_text=data.requirement_text, top_k=data.top_k),
-    )
+    if progress_callback:
+        progress_callback(8, "准备生成", "正在校验用户与生成参数...")
+
+    if progress_callback:
+        progress_callback(20, "RAG检索", "正在获取知识片段上下文...")
+    search_result = get_generation_context(db, data)
     retrieved_items = search_result["items"]
     if not retrieved_items:
         raise HTTPException(status_code=400, detail="RAG没有检索到可用上下文，请先补充知识库资料")
 
+    if progress_callback:
+        progress_callback(35, "记录检索", f"已获取 {len(retrieved_items)} 个知识片段，正在保存检索记录...")
     faiss_index = db.get(FaissIndex, search_result["faiss_index_id"])
     chunk_ids = [item["chunk_id"] for item in retrieved_items]
     scores = [item["score"] for item in retrieved_items]
@@ -68,7 +79,10 @@ def generate_test_cases(db: Session, data: AiGenerateRequest) -> dict:
     prompt_variables = {
         "requirement_text": data.requirement_text,
         "contexts": [item["chunk_text"] for item in retrieved_items],
+        "selected_chunk_ids": data.selected_chunk_ids or [],
     }
+    if progress_callback:
+        progress_callback(45, "拼接Prompt", "正在整理需求与知识片段...")
     user_prompt = build_user_prompt(data.requirement_text, retrieved_items)
 
     generation_record = AiGenerationRecord(
@@ -87,8 +101,14 @@ def generate_test_cases(db: Session, data: AiGenerateRequest) -> dict:
     db.flush()
 
     try:
+        if progress_callback:
+            progress_callback(58, "调用模型", "正在调用 DeepSeek 生成测试用例...")
         generated_text = call_deepseek(user_prompt)
+        if progress_callback:
+            progress_callback(78, "校验结果", "正在解析并校验生成的JSON结构...")
         generated_json = parse_generated_json(generated_text)
+        if progress_callback and data.save_to_case_set:
+            progress_callback(88, "保存草稿", "正在保存为草稿用例集...")
         case_set_id = save_generated_case_set(db, generated_json, data.created_by) if data.save_to_case_set else None
 
         generation_record.generated_text = generated_text
@@ -97,6 +117,8 @@ def generate_test_cases(db: Session, data: AiGenerateRequest) -> dict:
         generation_record.generation_status = "success"
         db.commit()
         db.refresh(generation_record)
+        if progress_callback:
+            progress_callback(100, "完成", "AI生成完成")
 
         return {
             "generation_id": generation_record.generation_id,
@@ -112,6 +134,133 @@ def generate_test_cases(db: Session, data: AiGenerateRequest) -> dict:
         generation_record.error_message = safe_message
         db.commit()
         raise HTTPException(status_code=500, detail=safe_message) from error
+
+
+def start_generate_test_cases(data: AiGenerateRequest, operator_id: int) -> dict:
+    """启动异步 AI 生成任务，立即返回 task_id。"""
+    data.created_by = operator_id
+    task_id = str(uuid.uuid4())
+    _generation_tasks[task_id] = {
+        "status": "pending",
+        "progress": 0,
+        "stage": "等待",
+        "detail": "任务排队中",
+    }
+    thread = threading.Thread(target=_run_generation_task, args=(task_id, data), daemon=True)
+    thread.start()
+    return {"task_id": task_id, "status": "running"}
+
+
+def get_generation_progress(task_id: str) -> dict:
+    task = _generation_tasks.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="生成任务不存在")
+    return task
+
+
+def _run_generation_task(task_id: str, data: AiGenerateRequest) -> None:
+    def progress_callback(progress: int, stage: str, detail: str) -> None:
+        _generation_tasks[task_id] = {
+            "status": "running",
+            "progress": progress,
+            "stage": stage,
+            "detail": detail,
+        }
+
+    db = SessionLocal()
+    try:
+        progress_callback(3, "开始", "任务已启动")
+        result = generate_test_cases(db, data, progress_callback)
+        _generation_tasks[task_id] = {
+            "status": "success",
+            "progress": 100,
+            "stage": "完成",
+            "detail": "AI生成完成",
+            "result": result,
+        }
+    except HTTPException as error:
+        _generation_tasks[task_id] = {
+            "status": "error",
+            "progress": _generation_tasks.get(task_id, {}).get("progress", 0),
+            "stage": "失败",
+            "detail": str(error.detail),
+        }
+    except Exception as error:
+        _generation_tasks[task_id] = {
+            "status": "error",
+            "progress": _generation_tasks.get(task_id, {}).get("progress", 0),
+            "stage": "失败",
+            "detail": safe_ai_error_message(error),
+        }
+    finally:
+        db.close()
+
+
+def get_generation_context(db: Session, data: AiGenerateRequest) -> dict:
+    """获取 AI 生成上下文：优先使用用户勾选的知识片段，否则按 top_k 自动检索。"""
+    if data.selected_chunk_ids:
+        return load_selected_chunks_for_generation(db, data.knowledge_base_id, data.selected_chunk_ids, data.requirement_text)
+    return search_knowledge_base(
+        db,
+        data.knowledge_base_id,
+        RagSearchRequest(query_text=data.requirement_text, top_k=data.top_k),
+    )
+
+
+def load_selected_chunks_for_generation(
+    db: Session,
+    knowledge_base_id: int,
+    selected_chunk_ids: list[int],
+    requirement_text: str,
+) -> dict:
+    chunk_ids = list(dict.fromkeys(selected_chunk_ids))
+    if len(chunk_ids) > 10:
+        raise HTTPException(status_code=400, detail="最多只能选择10个知识片段参与生成")
+
+    faiss_index = db.scalar(
+        select(FaissIndex).where(
+            FaissIndex.knowledge_base_id == knowledge_base_id,
+            FaissIndex.index_name == "main",
+            FaissIndex.status == "active",
+        )
+    )
+    if not faiss_index:
+        raise HTTPException(status_code=400, detail="当前知识库还没有可用FAISS索引，请先构建索引")
+
+    chunks = list(
+        db.scalars(
+            select(KnowledgeChunk).where(
+                KnowledgeChunk.chunk_id.in_(chunk_ids),
+                KnowledgeChunk.faiss_index_id == faiss_index.faiss_index_id,
+                KnowledgeChunk.is_deleted == 0,
+            )
+        ).all()
+    )
+    if len(chunks) != len(chunk_ids):
+        raise HTTPException(status_code=400, detail="存在无效或已删除的知识片段，请重新预检索后再生成")
+
+    chunk_map = {chunk.chunk_id: chunk for chunk in chunks}
+    ordered_chunks = [chunk_map[chunk_id] for chunk_id in chunk_ids]
+    source_ids = list({chunk.source_id for chunk in ordered_chunks})
+    sources = list(db.scalars(select(KnowledgeSource).where(KnowledgeSource.source_id.in_(source_ids))).all())
+    source_names = {source.source_id: source.source_name for source in sources}
+
+    return {
+        "knowledge_base_id": knowledge_base_id,
+        "faiss_index_id": faiss_index.faiss_index_id,
+        "query_text": requirement_text,
+        "items": [
+            {
+                "chunk_id": chunk.chunk_id,
+                "source_id": chunk.source_id,
+                "source_name": source_names.get(chunk.source_id),
+                "score": 1.0,
+                "chunk_text": chunk.chunk_text,
+                "metadata": chunk.metadata_json,
+            }
+            for chunk in ordered_chunks
+        ],
+    }
 
 
 def safe_ai_error_message(error: Exception) -> str:
@@ -234,7 +383,91 @@ def parse_generated_json(generated_text: str) -> dict:
         raise ValueError("大模型JSON缺少case_set_name或nodes字段")
     if not isinstance(parsed["nodes"], list):
         raise ValueError("nodes字段必须是数组")
-    return parsed
+    return normalize_generated_json(parsed)
+
+
+def normalize_generated_json(parsed: dict) -> dict:
+    """规范化并校验大模型返回的用例树，避免脏结构入库。"""
+    case_set_name = str(parsed.get("case_set_name") or "AI生成用例集").strip()[:200] or "AI生成用例集"
+    counter = {"count": 0}
+    nodes = normalize_generated_nodes(parsed.get("nodes") or [], 1, counter)
+    if not nodes:
+        raise ValueError("AI生成结果没有可用节点")
+    return {
+        "case_set_name": case_set_name,
+        "nodes": nodes,
+        "quality_warnings": build_quality_warnings(nodes),
+    }
+
+
+def normalize_generated_nodes(nodes: list, depth: int, counter: dict) -> list[dict]:
+    if not isinstance(nodes, list):
+        raise ValueError("children字段必须是数组")
+    if depth > MAX_GENERATED_TREE_DEPTH:
+        if nodes:
+            raise ValueError(f"AI生成结果层级过深，最多支持{MAX_GENERATED_TREE_DEPTH}层")
+        return []
+
+    result = []
+    for index, node_data in enumerate(nodes, start=1):
+        if not isinstance(node_data, dict):
+            raise ValueError("nodes中存在非对象节点")
+        counter["count"] += 1
+        if counter["count"] > MAX_GENERATED_NODE_COUNT:
+            raise ValueError(f"AI生成节点过多，最多支持{MAX_GENERATED_NODE_COUNT}个节点")
+
+        children = normalize_generated_nodes(node_data.get("children") or [], depth + 1, counter)
+        raw_node_type = node_data.get("node_type")
+        node_type = raw_node_type if raw_node_type in VALID_NODE_TYPES else ("folder" if children else "case")
+        priority = node_data.get("priority") if node_data.get("priority") in VALID_PRIORITIES else "P1"
+        title = str(node_data.get("title") or f"未命名节点{index}").strip()[:300] or f"未命名节点{index}"
+
+        precondition = clean_optional_text(node_data.get("precondition"))
+        test_steps = clean_optional_text(node_data.get("test_steps"))
+        expected_result = clean_optional_text(node_data.get("expected_result"))
+        if node_type == "case":
+            test_steps = test_steps or "待人工补充测试步骤"
+            expected_result = expected_result or "待人工补充预期结果"
+
+        result.append(
+            {
+                "title": title,
+                "node_type": node_type,
+                "priority": priority,
+                "precondition": precondition,
+                "test_steps": test_steps,
+                "expected_result": expected_result,
+                "children": children,
+            }
+        )
+    return result
+
+
+def clean_optional_text(value) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def build_quality_warnings(nodes: list[dict]) -> list[str]:
+    warnings = []
+    stats = {"case_count": 0, "placeholder_count": 0}
+
+    def walk(items: list[dict]) -> None:
+        for item in items:
+            if item["node_type"] == "case":
+                stats["case_count"] += 1
+                if item.get("test_steps", "").startswith("待人工补充") or item.get("expected_result", "").startswith("待人工补充"):
+                    stats["placeholder_count"] += 1
+            walk(item.get("children") or [])
+
+    walk(nodes)
+    if stats["case_count"] == 0:
+        warnings.append("生成结果未包含测试用例节点，请人工检查目录结构")
+    if stats["placeholder_count"]:
+        warnings.append(f"{stats['placeholder_count']}条用例缺少步骤或预期，已标记为待人工补充")
+    return warnings
 
 
 def save_generated_case_set(db: Session, generated_json: dict, created_by: int) -> int:

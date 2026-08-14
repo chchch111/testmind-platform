@@ -21,6 +21,7 @@ export const SOURCE_TYPE_TEXT = {
 export const INDEX_STATUS_TEXT = {
   none: '未构建',
   rebuilding: '构建中',
+  stale: '已过期',
   active: '可用',
   deleted: '已删除'
 }

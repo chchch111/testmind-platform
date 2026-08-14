@@ -8,6 +8,7 @@ class AiGenerateRequest(BaseModel):
     knowledge_base_id: int
     requirement_text: str = Field(min_length=1)
     top_k: int = Field(default=5, ge=1, le=10)
+    selected_chunk_ids: list[int] | None = None
     created_by: int = 1
     save_to_case_set: bool = True
 

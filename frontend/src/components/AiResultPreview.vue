@@ -10,6 +10,19 @@
         <el-tag v-else type="warning" size="large">仅预览，未入库</el-tag>
       </div>
 
+      <el-alert
+        v-if="qualityWarnings.length"
+        class="quality-alert"
+        type="warning"
+        show-icon
+        :closable="false"
+        title="生成结果需要人工复核"
+      >
+        <template #default>
+          <div v-for="warning in qualityWarnings" :key="warning">{{ warning }}</div>
+        </template>
+      </el-alert>
+
       <div class="stat-row">
         <div class="stat-card">
           <span>总节点</span>
@@ -66,6 +79,7 @@ const props = defineProps({
 const generatedJson = computed(() => props.result?.generated_json || null)
 const caseSetName = computed(() => generatedJson.value?.case_set_name || 'AI生成用例集')
 const caseSetId = computed(() => props.result?.case_set_id || null)
+const qualityWarnings = computed(() => generatedJson.value?.quality_warnings || [])
 
 const treeNodes = computed(() => normalizeNodes(generatedJson.value?.nodes || []))
 
@@ -117,6 +131,10 @@ function walkNodes(nodes, callback) {
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
+  margin-bottom: 16px;
+}
+
+.quality-alert {
   margin-bottom: 16px;
 }
 
