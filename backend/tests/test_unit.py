@@ -113,3 +113,12 @@ class TestBuildUserPrompt:
         assert "测试夜视红外灯" in prompt
         assert "红外灯应在低照度自动开启。" in prompt
         assert "case_set_name" in prompt
+
+    def test_contains_generation_mode_guide(self):
+        prompt = build_user_prompt("测试参数边界", [{"chunk_text": "码率范围1-8Mbps。"}], generation_mode="boundary")
+        assert "边界值" in prompt
+        assert "码率范围1-8Mbps。" in prompt
+
+    def test_invalid_generation_mode_falls_back_to_comprehensive(self):
+        prompt = build_user_prompt("测试综合场景", [{"chunk_text": "设备支持断网恢复。"}], generation_mode="unknown")
+        assert "综合覆盖功能主流程" in prompt

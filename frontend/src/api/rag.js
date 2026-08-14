@@ -38,6 +38,10 @@ export function listKnowledgeSources(knowledgeBaseId) {
   return request.get(`/api/rag/knowledge-bases/${knowledgeBaseId}/sources`)
 }
 
+export function listKnowledgeChunks(knowledgeBaseId) {
+  return request.get(`/api/rag/knowledge-bases/${knowledgeBaseId}/chunks`)
+}
+
 export function deleteKnowledgeSource(sourceId) {
   return request.delete(`/api/rag/sources/${sourceId}`)
 }

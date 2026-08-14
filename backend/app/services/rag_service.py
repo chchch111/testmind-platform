@@ -581,6 +581,8 @@ def search_knowledge_base(db: Session, knowledge_base_id: int, data: RagSearchRe
         source_names = {source.source_id: source.source_name for source in sources}
 
     for chunk, score in chunks:
+        if data.score_threshold is not None and score < data.score_threshold:
+            continue
         items.append(
             {
                 "chunk_id": chunk.chunk_id,
@@ -598,6 +600,47 @@ def search_knowledge_base(db: Session, knowledge_base_id: int, data: RagSearchRe
         "query_text": data.query_text,
         "items": items,
     }
+
+
+def list_knowledge_chunks(db: Session, knowledge_base_id: int) -> list[dict]:
+    get_active_knowledge_base(db, knowledge_base_id)
+    faiss_index = db.scalar(
+        select(FaissIndex).where(
+            FaissIndex.knowledge_base_id == knowledge_base_id,
+            FaissIndex.index_name == "main",
+            FaissIndex.status == "active",
+        )
+    )
+    if not faiss_index:
+        return []
+
+    chunks = list(
+        db.scalars(
+            select(KnowledgeChunk)
+            .where(KnowledgeChunk.faiss_index_id == faiss_index.faiss_index_id, KnowledgeChunk.is_deleted == 0)
+            .order_by(KnowledgeChunk.source_id.asc(), KnowledgeChunk.chunk_no.asc(), KnowledgeChunk.chunk_id.asc())
+        ).all()
+    )
+    if not chunks:
+        return []
+
+    source_ids = list({chunk.source_id for chunk in chunks})
+    sources = list(db.scalars(select(KnowledgeSource).where(KnowledgeSource.source_id.in_(source_ids))).all())
+    source_map = {source.source_id: source for source in sources}
+    return [
+        {
+            "chunk_id": chunk.chunk_id,
+            "source_id": chunk.source_id,
+            "source_name": source_map.get(chunk.source_id).source_name if source_map.get(chunk.source_id) else None,
+            "source_type": source_map.get(chunk.source_id).source_type if source_map.get(chunk.source_id) else None,
+            "chunk_no": chunk.chunk_no,
+            "chunk_text": chunk.chunk_text,
+            "chunk_length": len(chunk.chunk_text or ""),
+            "metadata": chunk.metadata_json,
+            "created_at": chunk.created_at,
+        }
+        for chunk in chunks
+    ]
 
 
 def load_cached_faiss_resources(faiss_index: FaissIndex):

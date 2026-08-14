@@ -15,3 +15,7 @@ export function getGenerateProgress(taskId) {
 export function listGenerationRecords() {
   return request.get('/api/ai/generation-records')
 }
+
+export function getGenerationRecordDetail(generationId) {
+  return request.get(`/api/ai/generation-records/${generationId}`)
+}

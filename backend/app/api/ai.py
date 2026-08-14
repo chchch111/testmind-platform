@@ -4,8 +4,14 @@ from sqlalchemy.orm import Session
 from app.core.auth import get_current_active_user
 from app.db.deps import get_db
 from app.models.user import User
-from app.schemas.ai import AiGenerateOut, AiGenerateRequest, AiGenerationRecordOut
-from app.services.ai_service import generate_test_cases, get_generation_progress, list_generation_records, start_generate_test_cases
+from app.schemas.ai import AiGenerateOut, AiGenerateRequest, AiGenerationRecordDetailOut, AiGenerationRecordOut
+from app.services.ai_service import (
+    generate_test_cases,
+    get_generation_progress,
+    get_generation_record_detail,
+    list_generation_records,
+    start_generate_test_cases,
+)
 
 
 router = APIRouter(prefix="/api/ai", tags=["AI自动生成测试用例"])
@@ -40,3 +46,8 @@ def api_get_generate_case_set_progress(
 @router.get("/generation-records", response_model=list[AiGenerationRecordOut])
 def api_list_generation_records(db: Session = Depends(get_db)):
     return list_generation_records(db)
+
+
+@router.get("/generation-records/{generation_id}", response_model=AiGenerationRecordDetailOut)
+def api_get_generation_record_detail(generation_id: int, db: Session = Depends(get_db)):
+    return get_generation_record_detail(db, generation_id)

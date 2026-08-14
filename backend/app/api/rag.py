@@ -6,6 +6,7 @@ from app.db.deps import get_db
 from app.models.user import User
 from app.schemas.rag import (
     BuildIndexOut,
+    KnowledgeChunkOut,
     KnowledgeBaseCreate,
     KnowledgeBaseOut,
     KnowledgeBaseUpdate,
@@ -22,6 +23,7 @@ from app.services.rag_service import (
     delete_knowledge_source,
     get_build_progress,
     import_case_set_as_source,
+    list_knowledge_chunks,
     list_knowledge_bases,
     list_knowledge_sources,
     search_knowledge_base,
@@ -102,6 +104,11 @@ def api_import_case_set_as_source(
 @router.get("/knowledge-bases/{knowledge_base_id}/sources", response_model=list[KnowledgeSourceOut])
 def api_list_knowledge_sources(knowledge_base_id: int, db: Session = Depends(get_db)):
     return list_knowledge_sources(db, knowledge_base_id)
+
+
+@router.get("/knowledge-bases/{knowledge_base_id}/chunks", response_model=list[KnowledgeChunkOut])
+def api_list_knowledge_chunks(knowledge_base_id: int, db: Session = Depends(get_db)):
+    return list_knowledge_chunks(db, knowledge_base_id)
 
 
 @router.delete("/sources/{source_id}")

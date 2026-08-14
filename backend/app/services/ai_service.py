@@ -26,6 +26,14 @@ MAX_GENERATED_NODE_COUNT = 120
 MAX_GENERATED_TREE_DEPTH = 6
 VALID_NODE_TYPES = {"folder", "case"}
 VALID_PRIORITIES = {"P0", "P1", "P2", "P3"}
+GENERATION_MODE_GUIDES = {
+    "comprehensive": "综合覆盖功能主流程、异常场景、边界条件、兼容性与回归风险，输出结构均衡的测试用例。",
+    "functional": "重点覆盖功能主流程、关键业务路径、典型用户操作和正向验证。",
+    "boundary": "重点覆盖边界值、阈值、极限输入、容量限制、状态临界点和参数组合边界。",
+    "exception": "重点覆盖异常输入、错误状态、断网断电、资源不足、权限不足、设备故障和恢复场景。",
+    "compatibility": "重点覆盖不同硬件版本、浏览器、分辨率、协议、系统版本和外设组合的兼容性。",
+    "regression": "重点覆盖历史缺陷、核心链路、版本升级影响面和高风险回归路径。",
+}
 _generation_tasks: dict[str, dict] = {}
 
 
@@ -80,10 +88,12 @@ def generate_test_cases(db: Session, data: AiGenerateRequest, progress_callback=
         "requirement_text": data.requirement_text,
         "contexts": [item["chunk_text"] for item in retrieved_items],
         "selected_chunk_ids": data.selected_chunk_ids or [],
+        "generation_mode": normalize_generation_mode(data.generation_mode),
+        "score_threshold": data.score_threshold,
     }
     if progress_callback:
         progress_callback(45, "拼接Prompt", "正在整理需求与知识片段...")
-    user_prompt = build_user_prompt(data.requirement_text, retrieved_items)
+    user_prompt = build_user_prompt(data.requirement_text, retrieved_items, data.generation_mode)
 
     generation_record = AiGenerationRecord(
         user_id=data.created_by,
@@ -203,7 +213,7 @@ def get_generation_context(db: Session, data: AiGenerateRequest) -> dict:
     return search_knowledge_base(
         db,
         data.knowledge_base_id,
-        RagSearchRequest(query_text=data.requirement_text, top_k=data.top_k),
+        RagSearchRequest(query_text=data.requirement_text, top_k=data.top_k, score_threshold=data.score_threshold),
     )
 
 
@@ -288,7 +298,73 @@ def list_generation_records(db: Session) -> list[AiGenerationRecord]:
     return list(db.scalars(statement).all())
 
 
-def build_user_prompt(requirement_text: str, retrieved_items: list[dict]) -> str:
+def get_generation_record_detail(db: Session, generation_id: int) -> dict:
+    record = db.get(AiGenerationRecord, generation_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="AI生成记录不存在")
+
+    retrieved_items = []
+    retrieval = db.get(RagRetrievalRecord, record.retrieval_id) if record.retrieval_id else None
+    chunk_ids = list(retrieval.retrieved_chunk_ids or record.used_chunk_ids or []) if retrieval else list(record.used_chunk_ids or [])
+    scores = list(retrieval.retrieved_scores or []) if retrieval else []
+    if chunk_ids:
+        chunks = list(
+            db.scalars(
+                select(KnowledgeChunk).where(
+                    KnowledgeChunk.chunk_id.in_(chunk_ids),
+                    KnowledgeChunk.is_deleted == 0,
+                )
+            ).all()
+        )
+        chunk_map = {chunk.chunk_id: chunk for chunk in chunks}
+        source_ids = list({chunk.source_id for chunk in chunks})
+        sources = list(db.scalars(select(KnowledgeSource).where(KnowledgeSource.source_id.in_(source_ids))).all())
+        source_names = {source.source_id: source.source_name for source in sources}
+        for index, chunk_id in enumerate(chunk_ids):
+            chunk = chunk_map.get(chunk_id)
+            if not chunk:
+                continue
+            retrieved_items.append(
+                {
+                    "chunk_id": chunk.chunk_id,
+                    "source_id": chunk.source_id,
+                    "source_name": source_names.get(chunk.source_id),
+                    "score": scores[index] if index < len(scores) else None,
+                    "chunk_text": chunk.chunk_text,
+                    "metadata": chunk.metadata_json,
+                }
+            )
+
+    return {
+        "generation_id": record.generation_id,
+        "user_id": record.user_id,
+        "retrieval_id": record.retrieval_id,
+        "knowledge_base_id": retrieval.knowledge_base_id if retrieval else None,
+        "top_k": retrieval.top_k if retrieval else None,
+        "score_threshold": (record.prompt_variables_json or {}).get("score_threshold") if record.prompt_variables_json else None,
+        "generation_mode": (record.prompt_variables_json or {}).get("generation_mode") if record.prompt_variables_json else None,
+        "prompt_variables_json": record.prompt_variables_json,
+        "requirement_text": record.requirement_text,
+        "model_provider": record.model_provider,
+        "model_name": record.model_name,
+        "prompt_template_version": record.prompt_template_version,
+        "used_chunk_ids": record.used_chunk_ids,
+        "generated_json": record.generated_json,
+        "case_set_id": record.case_set_id,
+        "generation_status": record.generation_status,
+        "error_message": record.error_message,
+        "created_at": record.created_at,
+        "retrieved_items": retrieved_items,
+    }
+
+
+def normalize_generation_mode(mode: str | None) -> str:
+    return mode if mode in GENERATION_MODE_GUIDES else "comprehensive"
+
+
+def build_user_prompt(requirement_text: str, retrieved_items: list[dict], generation_mode: str = "comprehensive") -> str:
+    mode = normalize_generation_mode(generation_mode)
+    mode_guide = GENERATION_MODE_GUIDES[mode]
     context_text = "\n\n".join(
         f"【知识片段{i}】\n{item['chunk_text']}" for i, item in enumerate(retrieved_items, start=1)
     )
@@ -300,6 +376,9 @@ def build_user_prompt(requirement_text: str, retrieved_items: list[dict]) -> str
 
 【用户测试需求】
 {requirement_text}
+
+【生成侧重点】
+{mode_guide}
 
 【输出JSON格式示例】
 {{

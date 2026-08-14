@@ -75,6 +75,7 @@ class BuildIndexOut(BaseModel):
 class RagSearchRequest(BaseModel):
     query_text: str = Field(min_length=1)
     top_k: int = Field(default=5, ge=1, le=20)
+    score_threshold: float | None = Field(default=None, ge=0, le=1)
 
 
 class RagSearchItem(BaseModel):
@@ -91,3 +92,15 @@ class RagSearchOut(BaseModel):
     faiss_index_id: int
     query_text: str
     items: list[RagSearchItem]
+
+
+class KnowledgeChunkOut(BaseModel):
+    chunk_id: int
+    source_id: int
+    source_name: str | None = None
+    source_type: str | None = None
+    chunk_no: int
+    chunk_text: str
+    chunk_length: int
+    metadata: dict | None = None
+    created_at: datetime

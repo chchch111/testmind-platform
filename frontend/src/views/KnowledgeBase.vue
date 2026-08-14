@@ -176,6 +176,9 @@
                 <el-form-item label="返回数量">
                   <el-input-number v-model="searchForm.top_k" :min="1" :max="20" />
                 </el-form-item>
+                <el-form-item label="相似阈值">
+                  <el-input-number v-model="searchForm.score_threshold" :min="0" :max="1" :step="0.05" :precision="2" />
+                </el-form-item>
               </el-form>
               <el-button type="primary" :loading="searching" @click="handleSearch">开始检索</el-button>
 
@@ -214,6 +217,39 @@
                   <div class="result-text" :title="item.chunk_text">{{ item.chunk_text }}</div>
                 </div>
               </div>
+            </div>
+          </el-tab-pane>
+
+          <!-- Tab4 切片预览 -->
+          <el-tab-pane label="切片预览" name="chunks">
+            <div class="source-list">
+              <div class="source-list-head">
+                <span class="source-list-title">索引切片列表</span>
+                <el-button size="small" :loading="chunksLoading" @click="loadChunks">刷新</el-button>
+              </div>
+              <el-table v-loading="chunksLoading" :data="knowledgeChunks" border>
+                <el-table-column prop="chunk_id" label="chunk ID" width="90" />
+                <el-table-column label="来源" min-width="180" show-overflow-tooltip>
+                  <template #default="{ row }">{{ row.source_name || `来源#${row.source_id}` }}</template>
+                </el-table-column>
+                <el-table-column label="类型" width="120">
+                  <template #default="{ row }">
+                    <el-tag size="small" :type="sourceTypeTagType(row.source_type)">{{ sourceTypeText(row.source_type) }}</el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="chunk_no" label="序号" width="80" />
+                <el-table-column prop="chunk_length" label="长度" width="90" />
+                <el-table-column prop="chunk_text" label="内容预览" min-width="260" show-overflow-tooltip />
+                <el-table-column label="创建时间" width="170">
+                  <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
+                </el-table-column>
+                <el-table-column label="操作" width="90" fixed="right">
+                  <template #default="{ row }">
+                    <el-button size="small" text type="primary" @click="openChunkDetail(row)">详情</el-button>
+                  </template>
+                </el-table-column>
+              </el-table>
+              <el-empty v-if="!chunksLoading && !knowledgeChunks.length" description="暂无切片，请先构建可用索引" :image-size="60" />
             </div>
           </el-tab-pane>
         </el-tabs>
@@ -259,7 +295,7 @@
         <el-descriptions :column="2" border>
           <el-descriptions-item label="chunk_id">{{ activeChunk.chunk_id }}</el-descriptions-item>
           <el-descriptions-item label="source_id">{{ activeChunk.source_id }}</el-descriptions-item>
-          <el-descriptions-item label="相似度">{{ Number(activeChunk.score).toFixed(6) }}</el-descriptions-item>
+          <el-descriptions-item label="相似度">{{ activeChunk.score === undefined ? '-' : Number(activeChunk.score).toFixed(6) }}</el-descriptions-item>
           <el-descriptions-item label="来源">{{ activeChunk.source_name || `来源#${activeChunk.source_id}` }}</el-descriptions-item>
         </el-descriptions>
         <div class="chunk-section">
@@ -313,6 +349,7 @@ import {
   deleteKnowledgeSource,
   getBuildProgress,
   importCaseSetAsSource,
+  listKnowledgeChunks,
   listKnowledgeBases,
   listKnowledgeSources,
   searchKnowledgeBase,
@@ -346,7 +383,9 @@ const buildStageDetail = ref('')
 const buildProgress = ref(0)
 const searchResult = ref([])
 const knowledgeSources = ref([])
+const knowledgeChunks = ref([])
 const sourcesLoading = ref(false)
+const chunksLoading = ref(false)
 const activeTab = ref('sources')
 const sourceTab = ref('manual')
 const uploadFileList = ref([])
@@ -370,7 +409,8 @@ const sourceForm = reactive({
 
 const searchForm = reactive({
   query_text: '',
-  top_k: 5
+  top_k: 5,
+  score_threshold: 0
 })
 
 const hasActiveIndex = computed(() => selectedKnowledgeBase.value?.index_status === 'active')
@@ -397,6 +437,7 @@ async function loadKnowledgeBases() {
     if (!selectedKnowledgeBase.value && knowledgeBases.value.length) {
       selectedKnowledgeBase.value = knowledgeBases.value[0]
       await loadSources()
+      await loadChunks()
     } else if (selectedKnowledgeBase.value) {
       const updated = knowledgeBases.value.find(item => item.knowledge_base_id === selectedKnowledgeBase.value.knowledge_base_id)
       if (updated) {
@@ -484,6 +525,7 @@ function handleSelectKnowledgeBase(kb) {
   searchResult.value = []
   activeTab.value = 'sources'
   loadSources()
+  loadChunks()
 }
 
 async function loadSources() {
@@ -497,6 +539,20 @@ async function loadSources() {
     knowledgeSources.value = []
   } finally {
     sourcesLoading.value = false
+  }
+}
+
+async function loadChunks() {
+  if (!selectedKnowledgeBase.value) {
+    return
+  }
+  chunksLoading.value = true
+  try {
+    knowledgeChunks.value = await listKnowledgeChunks(selectedKnowledgeBase.value.knowledge_base_id)
+  } catch {
+    knowledgeChunks.value = []
+  } finally {
+    chunksLoading.value = false
   }
 }
 
@@ -616,6 +672,7 @@ async function pollBuildProgress(taskId) {
       buildResult.value = state.result
       showSuccess('FAISS索引构建成功')
       await loadKnowledgeBases()
+      await loadChunks()
       return
     }
     if (state.status === 'error') {
@@ -647,7 +704,8 @@ async function handleSearch() {
   try {
     const result = await searchKnowledgeBase(selectedKnowledgeBase.value.knowledge_base_id, {
       query_text: searchForm.query_text,
-      top_k: searchForm.top_k
+      top_k: searchForm.top_k,
+      score_threshold: searchForm.score_threshold ?? null
     })
     searchResult.value = result.items || []
     showSuccess(`检索完成，命中 ${searchResult.value.length} 条知识片段`)

@@ -57,12 +57,27 @@
               />
             </el-form-item>
 
+            <el-form-item label="生成模式">
+              <el-select v-model="form.generation_mode" class="full-width">
+                <el-option v-for="item in generationModeOptions" :key="item.value" :label="item.label" :value="item.value" />
+              </el-select>
+              <div class="mode-hint">{{ selectedGenerationMode?.description }}</div>
+            </el-form-item>
+
             <el-row :gutter="12">
               <el-col :span="12">
                 <el-form-item label="检索片段数 top_k">
                   <el-input-number v-model="form.top_k" class="full-width" :min="1" :max="10" />
                 </el-form-item>
               </el-col>
+              <el-col :span="12">
+                <el-form-item label="相似度阈值">
+                  <el-input-number v-model="form.score_threshold" class="full-width" :min="0" :max="1" :step="0.05" :precision="2" />
+                </el-form-item>
+              </el-col>
+            </el-row>
+
+            <el-row :gutter="12">
               <el-col :span="12">
                 <el-form-item label="保存方式">
                   <el-switch v-model="form.save_to_case_set" active-text="自动入库" inactive-text="仅预览" />
@@ -166,10 +181,11 @@
         <el-table-column label="创建时间" width="190">
           <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="170" fixed="right">
+        <el-table-column label="操作" width="220" fixed="right">
           <template #default="{ row }">
             <el-button size="small" @click="previewRecord(row)">预览</el-button>
-            <el-button size="small" type="primary" @click="openRecordDetail(row)">详情</el-button>
+            <el-button size="small" type="primary" :loading="recordDetailLoading && activeRecord?.generation_id === row.generation_id" @click="openRecordDetail(row)">详情</el-button>
+            <el-button size="small" type="success" text :loading="reuseLoading && activeRecord?.generation_id === row.generation_id" @click="reuseRecord(row)">复用</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -185,7 +201,12 @@
             <el-tag :type="activeRecord.generation_status === 'success' ? 'success' : 'danger'">{{ activeRecord.generation_status }}</el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="模型">{{ activeRecord.model_provider }} / {{ activeRecord.model_name }}</el-descriptions-item>
+          <el-descriptions-item label="Prompt版本">{{ activeRecord.prompt_template_version || '-' }}</el-descriptions-item>
           <el-descriptions-item label="用例集">{{ activeRecord.case_set_id ? `#${activeRecord.case_set_id}` : '未入库' }}</el-descriptions-item>
+          <el-descriptions-item label="生成模式">{{ generationModeLabel(activeRecord.generation_mode) }}</el-descriptions-item>
+          <el-descriptions-item label="检索参数">
+            top_k={{ activeRecord.top_k || '-' }} / 阈值={{ activeRecord.score_threshold ?? 0 }}
+          </el-descriptions-item>
           <el-descriptions-item label="创建时间" :span="2">{{ formatDateTime(activeRecord.created_at) }}</el-descriptions-item>
         </el-descriptions>
         <div class="detail-section">
@@ -193,9 +214,19 @@
           <div class="detail-text">{{ activeRecord.requirement_text }}</div>
         </div>
         <div class="detail-section">
-          <div class="detail-title">使用知识片段ID</div>
-          <el-tag v-for="chunkId in activeRecord.used_chunk_ids || []" :key="chunkId" type="info">{{ chunkId }}</el-tag>
-          <span v-if="!activeRecord.used_chunk_ids?.length" class="empty-text">无</span>
+          <div class="detail-title">RAG命中知识片段</div>
+          <div v-if="activeRecord.retrieved_items?.length" class="record-chunk-list">
+            <div v-for="(item, index) in activeRecord.retrieved_items" :key="item.chunk_id" class="record-chunk-card">
+              <div class="record-chunk-head">
+                <el-tag size="small" type="info">#{{ index + 1 }}</el-tag>
+                <strong>{{ item.source_name || `来源#${item.source_id}` }}</strong>
+                <span>chunk #{{ item.chunk_id }}</span>
+                <span v-if="item.score !== null && item.score !== undefined">相似度 {{ formatScore(item.score) }}</span>
+              </div>
+              <div class="record-chunk-text">{{ item.chunk_text }}</div>
+            </div>
+          </div>
+          <span v-else class="empty-text">无可追溯知识片段</span>
         </div>
         <div v-if="activeRecord.error_message" class="detail-section">
           <div class="detail-title danger-text">错误信息</div>
@@ -208,6 +239,7 @@
       </div>
       <template #footer>
         <el-button @click="recordDetailVisible = false">关闭</el-button>
+        <el-button type="success" @click="reuseActiveRecord">复用参数</el-button>
         <el-button :disabled="!activeRecord?.case_set_id" type="primary" @click="router.push(`/case-sets/${activeRecord.case_set_id}`)">打开脑图</el-button>
       </template>
     </el-dialog>
@@ -218,7 +250,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import AiResultPreview from '../components/AiResultPreview.vue'
-import { getGenerateProgress, listGenerationRecords, startGenerateCaseSet } from '../api/ai'
+import { getGenerateProgress, getGenerationRecordDetail, listGenerationRecords, startGenerateCaseSet } from '../api/ai'
 import { listKnowledgeBases, searchKnowledgeBase } from '../api/rag'
 import { INDEX_STATUS_TEXT } from '../utils/constants'
 import { formatDateTime } from '../utils/format'
@@ -233,6 +265,8 @@ const generating = ref(false)
 const preSearching = ref(false)
 const recordLoading = ref(false)
 const recordDetailVisible = ref(false)
+const recordDetailLoading = ref(false)
+const reuseLoading = ref(false)
 const activeRecord = ref(null)
 const currentStageText = ref('等待输入需求并开始生成')
 const generateStageDetail = ref('')
@@ -245,11 +279,23 @@ let generatePollCancelled = false
 const form = reactive({
   knowledge_base_id: null,
   requirement_text: '基于摄像头WEB管理后台，生成视频编码参数、4K/1080P清晰度、存储空间、系统信息相关的功能测试用例。',
+  generation_mode: 'comprehensive',
   top_k: 5,
+  score_threshold: 0,
   save_to_case_set: true
 })
 
+const generationModeOptions = [
+  { label: '综合覆盖', value: 'comprehensive', description: '均衡覆盖主流程、异常、边界、兼容和回归风险。' },
+  { label: '功能主流程', value: 'functional', description: '重点生成正向功能验证和关键业务路径用例。' },
+  { label: '边界场景', value: 'boundary', description: '重点生成阈值、容量、极限参数和组合边界用例。' },
+  { label: '异常场景', value: 'exception', description: '重点生成错误输入、断网断电、资源不足和故障恢复用例。' },
+  { label: '兼容性', value: 'compatibility', description: '重点生成硬件版本、浏览器、协议和系统版本组合用例。' },
+  { label: '回归测试', value: 'regression', description: '重点生成核心链路、历史缺陷和版本升级影响面用例。' }
+]
+
 const selectedKnowledgeBase = computed(() => knowledgeBases.value.find(item => item.knowledge_base_id === form.knowledge_base_id) || null)
+const selectedGenerationMode = computed(() => generationModeOptions.find(item => item.value === form.generation_mode))
 const lastCaseSetId = computed(() => result.value?.case_set_id || null)
 const stageStatusType = computed(() => {
   if (generating.value) return 'running'
@@ -327,7 +373,9 @@ async function handleGenerate() {
     const task = await startGenerateCaseSet({
       knowledge_base_id: form.knowledge_base_id,
       requirement_text: form.requirement_text,
+      generation_mode: form.generation_mode,
       top_k: form.top_k,
+      score_threshold: form.score_threshold ?? null,
       selected_chunk_ids: selectedChunkIds.value.length ? selectedChunkIds.value : null,
       created_by: getCurrentUserId(),
       save_to_case_set: form.save_to_case_set
@@ -386,7 +434,8 @@ async function handlePreSearch() {
   try {
     const data = await searchKnowledgeBase(form.knowledge_base_id, {
       query_text: form.requirement_text,
-      top_k: form.top_k
+      top_k: form.top_k,
+      score_threshold: form.score_threshold ?? null
     })
     preSearchResult.value = data.items || []
     selectedChunkIds.value = preSearchResult.value.map(item => item.chunk_id)
@@ -428,9 +477,50 @@ async function copyGeneratedText() {
   showSuccess('已复制AI生成JSON')
 }
 
-function openRecordDetail(row) {
+async function openRecordDetail(row) {
   activeRecord.value = row
-  recordDetailVisible.value = true
+  recordDetailLoading.value = true
+  try {
+    activeRecord.value = await getGenerationRecordDetail(row.generation_id)
+    recordDetailVisible.value = true
+  } finally {
+    recordDetailLoading.value = false
+  }
+}
+
+async function reuseRecord(row) {
+  activeRecord.value = row
+  reuseLoading.value = true
+  try {
+    const detail = await getGenerationRecordDetail(row.generation_id)
+    applyRecordToForm(detail)
+  } finally {
+    reuseLoading.value = false
+  }
+}
+
+function reuseActiveRecord() {
+  if (activeRecord.value) {
+    applyRecordToForm(activeRecord.value)
+  }
+}
+
+function applyRecordToForm(record) {
+  if (record.knowledge_base_id) {
+    form.knowledge_base_id = record.knowledge_base_id
+  }
+  form.requirement_text = record.requirement_text || ''
+  form.top_k = record.top_k || form.top_k
+  form.score_threshold = record.score_threshold ?? 0
+  form.generation_mode = record.generation_mode || 'comprehensive'
+  clearPreSearch()
+  result.value = null
+  currentStageText.value = '已复用历史生成参数，可调整后重新生成'
+  generateStageDetail.value = ''
+  generateProgress.value = 0
+  recordDetailVisible.value = false
+  showSuccess('已复用历史生成参数')
+  window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
 function formatRecordJson(value) {
@@ -442,6 +532,10 @@ function formatRecordJson(value) {
 
 function formatScore(value) {
   return Number(value || 0).toFixed(4)
+}
+
+function generationModeLabel(value) {
+  return generationModeOptions.find(item => item.value === value)?.label || value || '-'
 }
 
 function previewRecord(row) {
@@ -460,7 +554,7 @@ onMounted(loadInitialData)
 onBeforeUnmount(stopGeneratePolling)
 
 watch(
-  () => [form.knowledge_base_id, form.requirement_text, form.top_k],
+  () => [form.knowledge_base_id, form.requirement_text, form.top_k, form.score_threshold, form.generation_mode],
   clearPreSearch
 )
 </script>
@@ -515,6 +609,13 @@ watch(
 
 .full-width {
   width: 100%;
+}
+
+.mode-hint {
+  margin-top: 6px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .kb-summary {
@@ -741,6 +842,51 @@ watch(
   background: #f8fafc;
   color: #475569;
   line-height: 1.7;
+}
+
+.record-chunk-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.record-chunk-card {
+  padding: 10px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.record-chunk-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.record-chunk-head strong {
+  flex: 1;
+  min-width: 0;
+  color: #334155;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.record-chunk-text {
+  margin-top: 8px;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .json-preview {
