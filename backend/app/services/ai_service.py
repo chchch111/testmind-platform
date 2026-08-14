@@ -70,6 +70,7 @@ def generate_test_cases(db: Session, data: AiGenerateRequest, progress_callback=
     faiss_index = db.get(FaissIndex, search_result["faiss_index_id"])
     chunk_ids = [item["chunk_id"] for item in retrieved_items]
     scores = [item["score"] for item in retrieved_items]
+    retrieval_summary = build_retrieval_summary(retrieved_items)
 
     retrieval_record = RagRetrievalRecord(
         user_id=data.created_by,
@@ -90,6 +91,7 @@ def generate_test_cases(db: Session, data: AiGenerateRequest, progress_callback=
         "selected_chunk_ids": data.selected_chunk_ids or [],
         "generation_mode": normalize_generation_mode(data.generation_mode),
         "score_threshold": data.score_threshold,
+        "retrieval_summary": retrieval_summary,
     }
     if progress_callback:
         progress_callback(45, "拼接Prompt", "正在整理需求与知识片段...")
@@ -136,6 +138,7 @@ def generate_test_cases(db: Session, data: AiGenerateRequest, progress_callback=
             "case_set_id": case_set_id,
             "generated_json": generated_json,
             "generated_text": generated_text,
+            "retrieval_summary": retrieval_summary,
         }
     except Exception as error:
         safe_message = safe_ai_error_message(error)
@@ -344,6 +347,7 @@ def get_generation_record_detail(db: Session, generation_id: int) -> dict:
         "score_threshold": (record.prompt_variables_json or {}).get("score_threshold") if record.prompt_variables_json else None,
         "generation_mode": (record.prompt_variables_json or {}).get("generation_mode") if record.prompt_variables_json else None,
         "prompt_variables_json": record.prompt_variables_json,
+        "retrieval_summary": (record.prompt_variables_json or {}).get("retrieval_summary") if record.prompt_variables_json else None,
         "requirement_text": record.requirement_text,
         "model_provider": record.model_provider,
         "model_name": record.model_name,
@@ -360,6 +364,26 @@ def get_generation_record_detail(db: Session, generation_id: int) -> dict:
 
 def normalize_generation_mode(mode: str | None) -> str:
     return mode if mode in GENERATION_MODE_GUIDES else "comprehensive"
+
+
+def build_retrieval_summary(retrieved_items: list[dict]) -> dict:
+    scores = [float(item["score"]) for item in retrieved_items if item.get("score") is not None]
+    source_ids = {item.get("source_id") for item in retrieved_items if item.get("source_id") is not None}
+    source_names = []
+    seen_names = set()
+    for item in retrieved_items:
+        source_name = item.get("source_name") or (f"source#{item.get('source_id')}" if item.get("source_id") else None)
+        if source_name and source_name not in seen_names:
+            seen_names.add(source_name)
+            source_names.append(source_name)
+    return {
+        "chunk_count": len(retrieved_items),
+        "source_count": len(source_ids),
+        "source_names": source_names[:10],
+        "max_score": round(max(scores), 6) if scores else None,
+        "min_score": round(min(scores), 6) if scores else None,
+        "avg_score": round(sum(scores) / len(scores), 6) if scores else None,
+    }
 
 
 def build_user_prompt(requirement_text: str, retrieved_items: list[dict], generation_mode: str = "comprehensive") -> str:
@@ -475,8 +499,43 @@ def normalize_generated_json(parsed: dict) -> dict:
     return {
         "case_set_name": case_set_name,
         "nodes": nodes,
+        "quality_summary": build_quality_summary(nodes),
         "quality_warnings": build_quality_warnings(nodes),
     }
+
+
+def build_quality_summary(nodes: list[dict]) -> dict:
+    summary = {
+        "total_nodes": 0,
+        "folder_count": 0,
+        "case_count": 0,
+        "max_depth": 0,
+        "priority_counts": {"P0": 0, "P1": 0, "P2": 0, "P3": 0},
+        "duplicate_title_count": 0,
+        "leaf_folder_count": 0,
+    }
+    title_counts: dict[str, int] = {}
+
+    def walk(items: list[dict], depth: int) -> None:
+        for item in items:
+            summary["max_depth"] = max(summary["max_depth"], depth)
+            summary["total_nodes"] += 1
+            title = item.get("title")
+            if title:
+                title_counts[title] = title_counts.get(title, 0) + 1
+            if item.get("node_type") == "folder":
+                summary["folder_count"] += 1
+                if not item.get("children"):
+                    summary["leaf_folder_count"] += 1
+            else:
+                summary["case_count"] += 1
+            priority = item.get("priority") if item.get("priority") in VALID_PRIORITIES else "P1"
+            summary["priority_counts"][priority] += 1
+            walk(item.get("children") or [], depth + 1)
+
+    walk(nodes, 1)
+    summary["duplicate_title_count"] = sum(count - 1 for count in title_counts.values() if count > 1)
+    return summary
 
 
 def normalize_generated_nodes(nodes: list, depth: int, counter: dict) -> list[dict]:

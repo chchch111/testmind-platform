@@ -5,7 +5,7 @@
 """
 import pytest
 
-from app.services.ai_service import MAX_GENERATED_NODE_COUNT, build_user_prompt, parse_generated_json
+from app.services.ai_service import MAX_GENERATED_NODE_COUNT, build_retrieval_summary, build_user_prompt, parse_generated_json
 from app.services.task_service import VALID_EXECUTION_STATUS
 from app.services.xmind_service import build_tagged_title, safe_xmind_error_message
 
@@ -59,6 +59,27 @@ class TestParseGeneratedJson:
         assert node["expected_result"] == "待人工补充预期结果"
         assert result["quality_warnings"]
 
+    def test_adds_quality_summary(self):
+        text = """
+        {
+          "case_set_name": "quality",
+          "nodes": [
+            {"title": "module", "node_type": "folder", "children": [
+              {"title": "case A", "node_type": "case", "priority": "P0"},
+              {"title": "case A", "node_type": "case", "priority": "P2"}
+            ]}
+          ]
+        }
+        """
+        result = parse_generated_json(text)
+        summary = result["quality_summary"]
+        assert summary["total_nodes"] == 3
+        assert summary["folder_count"] == 1
+        assert summary["case_count"] == 2
+        assert summary["max_depth"] == 2
+        assert summary["priority_counts"]["P0"] == 1
+        assert summary["duplicate_title_count"] == 1
+
     def test_rejects_too_deep_tree(self):
         text = '{"case_set_name":"a","nodes":[{"title":"1","children":[{"title":"2","children":[{"title":"3","children":[{"title":"4","children":[{"title":"5","children":[{"title":"6","children":[{"title":"7"}]}]}]}]}]}]}]}'
         with pytest.raises(ValueError, match="层级过深"):
@@ -105,6 +126,23 @@ class TestExecutionStatus:
     def test_valid_statuses_include_skipped(self):
         assert "skipped" in VALID_EXECUTION_STATUS
         assert VALID_EXECUTION_STATUS == {"not_run", "passed", "failed", "blocked", "skipped"}
+
+
+class TestBuildRetrievalSummary:
+    def test_summarizes_scores_and_sources(self):
+        summary = build_retrieval_summary(
+            [
+                {"chunk_id": 1, "source_id": 10, "source_name": "spec", "score": 0.9},
+                {"chunk_id": 2, "source_id": 10, "source_name": "spec", "score": 0.7},
+                {"chunk_id": 3, "source_id": 11, "source_name": "history", "score": 0.8},
+            ]
+        )
+        assert summary["chunk_count"] == 3
+        assert summary["source_count"] == 2
+        assert summary["source_names"] == ["spec", "history"]
+        assert summary["max_score"] == 0.9
+        assert summary["min_score"] == 0.7
+        assert summary["avg_score"] == 0.8
 
 
 class TestBuildUserPrompt:

@@ -207,6 +207,9 @@
           <el-descriptions-item label="检索参数">
             top_k={{ activeRecord.top_k || '-' }} / 阈值={{ activeRecord.score_threshold ?? 0 }}
           </el-descriptions-item>
+          <el-descriptions-item label="检索摘要">
+            {{ retrievalSummaryText(activeRecord.retrieval_summary) }}
+          </el-descriptions-item>
           <el-descriptions-item label="创建时间" :span="2">{{ formatDateTime(activeRecord.created_at) }}</el-descriptions-item>
         </el-descriptions>
         <div class="detail-section">
@@ -531,7 +534,15 @@ function formatRecordJson(value) {
 }
 
 function formatScore(value) {
+  if (value === null || value === undefined) return '-'
   return Number(value || 0).toFixed(4)
+}
+
+function retrievalSummaryText(summary) {
+  if (!summary) {
+    return '-'
+  }
+  return `片段 ${summary.chunk_count || 0} / 来源 ${summary.source_count || 0} / 平均相似度 ${formatScore(summary.avg_score)}`
 }
 
 function generationModeLabel(value) {
@@ -544,7 +555,8 @@ function previewRecord(row) {
     retrieval_id: row.retrieval_id,
     case_set_id: row.case_set_id,
     generated_json: row.generated_json || { case_set_name: '无可预览内容', nodes: [] },
-    generated_text: row.generated_json ? JSON.stringify(row.generated_json, null, 2) : ''
+    generated_text: row.generated_json ? JSON.stringify(row.generated_json, null, 2) : '',
+    retrieval_summary: row.retrieval_summary || null
   }
   currentStageText.value = row.generation_status === 'success' ? '生成完成，结果已返回前端' : '生成失败，请查看记录详情'
   window.scrollTo({ top: 260, behavior: 'smooth' })

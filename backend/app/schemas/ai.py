@@ -21,6 +21,7 @@ class AiGenerateOut(BaseModel):
     case_set_id: int | None
     generated_json: dict[str, Any]
     generated_text: str
+    retrieval_summary: dict[str, Any] | None = None
 
 
 class AiGenerationRecordOut(BaseModel):
@@ -56,4 +57,5 @@ class AiGenerationRecordDetailOut(AiGenerationRecordOut):
     score_threshold: float | None = None
     generation_mode: str | None = None
     prompt_variables_json: dict | None = None
+    retrieval_summary: dict | None = None
     retrieved_items: list[AiGenerationRetrievedItemOut] = Field(default_factory=list)

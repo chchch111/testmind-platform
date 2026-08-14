@@ -42,6 +42,29 @@
         </div>
       </div>
 
+      <div v-if="qualitySummary || retrievalSummary" class="diagnostic-row">
+        <div v-if="qualitySummary" class="diagnostic-card">
+          <span>结构深度</span>
+          <strong>{{ qualitySummary.max_depth || stats.maxDepth }}</strong>
+        </div>
+        <div v-if="qualitySummary" class="diagnostic-card">
+          <span>重复标题</span>
+          <strong>{{ qualitySummary.duplicate_title_count || 0 }}</strong>
+        </div>
+        <div v-if="qualitySummary" class="diagnostic-card">
+          <span>空目录</span>
+          <strong>{{ qualitySummary.leaf_folder_count || 0 }}</strong>
+        </div>
+        <div v-if="retrievalSummary" class="diagnostic-card">
+          <span>检索来源</span>
+          <strong>{{ retrievalSummary.source_count || 0 }}</strong>
+        </div>
+        <div v-if="retrievalSummary" class="diagnostic-card">
+          <span>平均相似度</span>
+          <strong>{{ formatScore(retrievalSummary.avg_score) }}</strong>
+        </div>
+      </div>
+
       <el-tree class="preview-tree" :data="treeNodes" default-expand-all node-key="preview_id">
         <template #default="{ data }">
           <div class="tree-node-row">
@@ -80,6 +103,8 @@ const generatedJson = computed(() => props.result?.generated_json || null)
 const caseSetName = computed(() => generatedJson.value?.case_set_name || 'AI生成用例集')
 const caseSetId = computed(() => props.result?.case_set_id || null)
 const qualityWarnings = computed(() => generatedJson.value?.quality_warnings || [])
+const qualitySummary = computed(() => generatedJson.value?.quality_summary || null)
+const retrievalSummary = computed(() => props.result?.retrieval_summary || null)
 
 const treeNodes = computed(() => normalizeNodes(generatedJson.value?.nodes || []))
 
@@ -88,10 +113,12 @@ const stats = computed(() => {
     total: 0,
     folderCount: 0,
     caseCount: 0,
+    maxDepth: 0,
     priority: { P0: 0, P1: 0, P2: 0, P3: 0 }
   }
-  walkNodes(treeNodes.value, node => {
+  walkNodes(treeNodes.value, (node, depth) => {
     value.total += 1
+    value.maxDepth = Math.max(value.maxDepth, depth)
     if (node.node_type === 'folder') {
       value.folderCount += 1
     } else {
@@ -113,11 +140,16 @@ function normalizeNodes(nodes, path = 'node') {
   }))
 }
 
-function walkNodes(nodes, callback) {
+function walkNodes(nodes, callback, depth = 1) {
   nodes.forEach(node => {
-    callback(node)
-    walkNodes(node.children || [], callback)
+    callback(node, depth)
+    walkNodes(node.children || [], callback, depth + 1)
   })
+}
+
+function formatScore(value) {
+  if (value === null || value === undefined) return '-'
+  return Number(value || 0).toFixed(4)
 }
 </script>
 
@@ -157,6 +189,13 @@ function walkNodes(nodes, callback) {
   margin-bottom: 16px;
 }
 
+.diagnostic-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
 .stat-card {
   padding: 12px;
   border-radius: 10px;
@@ -175,6 +214,26 @@ function walkNodes(nodes, callback) {
   margin-top: 6px;
   font-size: 22px;
   color: #111827;
+}
+
+.diagnostic-card {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+}
+
+.diagnostic-card span {
+  display: block;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.diagnostic-card strong {
+  display: block;
+  margin-top: 4px;
+  color: #0f172a;
+  font-size: 18px;
 }
 
 .stat-card.p0 {
